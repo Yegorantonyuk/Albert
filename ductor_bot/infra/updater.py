@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -61,12 +62,16 @@ async def perform_upgrade() -> tuple[bool, str]:
     """Run the package upgrade. Returns ``(success, output)``.
 
     Refuses to upgrade dev/editable installs -- those should use ``git pull``.
+    Sets ``PIP_NO_CACHE_DIR=1`` to avoid serving stale wheels from the pip
+    cache when PyPI CDN hasn't propagated the new version yet.
     """
     from ductor_bot.infra.install import detect_install_mode
 
     mode = detect_install_mode()
     if mode == "dev":
         return False, "Running from source (editable install). Use `git pull` to update."
+
+    env = {**os.environ, "PIP_NO_CACHE_DIR": "1"}
     if mode == "pipx":
         cmd = ["pipx", "upgrade", "--force", "ductor"]
     else:
@@ -76,10 +81,28 @@ async def perform_upgrade() -> tuple[bool, str]:
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env=env,
     )
     stdout, _ = await proc.communicate()
     output = stdout.decode(errors="replace") if stdout else ""
     return (proc.returncode or 0) == 0, output
+
+
+async def get_installed_version() -> str:
+    """Read the installed package version in a fresh subprocess.
+
+    The running process caches module metadata, so we spawn a child to
+    reliably read the version that is actually on disk after an upgrade.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "from importlib.metadata import version; print(version('ductor'))",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    return stdout.decode().strip() if stdout else "0.0.0"
 
 
 # ---------------------------------------------------------------------------

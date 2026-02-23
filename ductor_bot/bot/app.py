@@ -54,6 +54,7 @@ from ductor_bot.infra.restart import EXIT_RESTART, consume_restart_marker, consu
 from ductor_bot.infra.updater import (
     UpdateObserver,
     consume_upgrade_sentinel,
+    get_installed_version,
     perform_upgrade,
     write_upgrade_sentinel,
 )
@@ -814,13 +815,31 @@ class TelegramBot:
             )
             return
 
-        # Write sentinel for post-restart message
+        # Verify the upgrade actually installed the new version
+        actual_version = await get_installed_version()
+        if actual_version == current:
+            logger.warning(
+                "Upgrade reported success but version unchanged: %s (target=%s)",
+                actual_version,
+                target_version,
+            )
+            await self._bot.send_message(
+                chat_id,
+                f"Version unchanged after upgrade ({actual_version}). "
+                "The new release may not have propagated to PyPI yet. "
+                "Try again in a few minutes.",
+                parse_mode=None,
+                message_thread_id=thread_id,
+            )
+            return
+
+        # Write sentinel for post-restart message (use actual installed version)
         await asyncio.to_thread(
             write_upgrade_sentinel,
             self._orch.paths.ductor_home,
             chat_id=chat_id,
             old_version=current,
-            new_version=target_version,
+            new_version=actual_version,
         )
 
         await self._bot.send_message(

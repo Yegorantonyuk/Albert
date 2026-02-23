@@ -514,6 +514,7 @@ def _uninstall() -> None:
 def _upgrade() -> None:
     """Stop bot, upgrade package, restart."""
     from ductor_bot.infra.install import detect_install_mode
+    from ductor_bot.infra.version import get_current_version
 
     mode = detect_install_mode()
     if mode == "dev":
@@ -542,17 +543,21 @@ def _upgrade() -> None:
         ),
     )
 
+    current = get_current_version()
+
     # 1. Graceful stop
     _stop_bot()
 
-    # 2. Upgrade
+    # 2. Upgrade (bypass pip cache to avoid stale wheels)
     _console.print("[dim]Upgrading package...[/dim]")
+    env = {**os.environ, "PIP_NO_CACHE_DIR": "1"}
     if mode == "pipx":
         result = subprocess.run(
-            ["pipx", "upgrade", "ductor"],
+            ["pipx", "upgrade", "--force", "ductor"],
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
     else:
         result = subprocess.run(
@@ -560,6 +565,7 @@ def _upgrade() -> None:
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
 
     if result.returncode != 0:
@@ -569,7 +575,23 @@ def _upgrade() -> None:
     output = result.stdout.strip()
     if output:
         _console.print(f"[dim]{output}[/dim]")
-    _console.print("[green]Upgrade complete.[/green]")
+
+    # Verify version actually changed
+    check = subprocess.run(
+        [sys.executable, "-c", "from importlib.metadata import version; print(version('ductor'))"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    actual = check.stdout.strip() if check.returncode == 0 else current
+    if actual == current:
+        _console.print(
+            f"[bold yellow]Version unchanged after upgrade ({actual}).[/bold yellow]\n"
+            "The new release may not have propagated to PyPI yet. Try again in a few minutes."
+        )
+        return
+
+    _console.print(f"[green]Upgrade complete: {current} -> {actual}[/green]")
 
     # 3. Re-exec with new version
     _console.print("[dim]Restarting...[/dim]")

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ductor_bot.config import AgentConfig
+from ductor_bot.infra.version import get_current_version
 from ductor_bot.workspace.paths import DuctorPaths
 
 
@@ -332,24 +333,25 @@ class TestUpgradeCli:
         paths = _make_paths(tmp_path)
         paths.ductor_home.mkdir(parents=True)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "upgraded ductor 1.0.0 -> 2.0.0"
-        mock_result.stderr = ""
+        upgrade_result = MagicMock(returncode=0, stdout="upgraded ductor", stderr="")
+        verify_result = MagicMock(returncode=0, stdout="9.9.9\n", stderr="")
 
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pipx"),
             patch("ductor_bot.__main__.resolve_paths", return_value=paths),
-            patch("ductor_bot.__main__.subprocess.run", return_value=mock_result) as mock_run,
+            patch(
+                "ductor_bot.__main__.subprocess.run",
+                side_effect=[upgrade_result, verify_result],
+            ) as mock_run,
             patch("ductor_bot.__main__._re_exec_bot") as mock_exec,
             patch("ductor_bot.__main__._stop_bot"),
         ):
             _upgrade()
 
-        # Check pipx upgrade was called
-        run_args = mock_run.call_args[0][0]
-        assert "pipx" in run_args
-        assert "upgrade" in run_args
+        # First subprocess.run = pipx upgrade, second = version check
+        upgrade_args = mock_run.call_args_list[0][0][0]
+        assert "pipx" in upgrade_args
+        assert "upgrade" in upgrade_args
         mock_exec.assert_called_once()
 
     def test_upgrade_with_pip(self, tmp_path: Path) -> None:
@@ -358,23 +360,49 @@ class TestUpgradeCli:
         paths = _make_paths(tmp_path)
         paths.ductor_home.mkdir(parents=True)
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "installed ductor-2.0.0"
-        mock_result.stderr = ""
+        upgrade_result = MagicMock(returncode=0, stdout="installed ductor-2.0.0", stderr="")
+        verify_result = MagicMock(returncode=0, stdout="9.9.9\n", stderr="")
 
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pip"),
             patch("ductor_bot.__main__.resolve_paths", return_value=paths),
-            patch("ductor_bot.__main__.subprocess.run", return_value=mock_result) as mock_run,
+            patch(
+                "ductor_bot.__main__.subprocess.run",
+                side_effect=[upgrade_result, verify_result],
+            ) as mock_run,
             patch("ductor_bot.__main__._re_exec_bot") as mock_exec,
             patch("ductor_bot.__main__._stop_bot"),
         ):
             _upgrade()
 
-        run_args = mock_run.call_args[0][0]
-        assert "pip" in " ".join(str(a) for a in run_args)
+        upgrade_args = mock_run.call_args_list[0][0][0]
+        assert "pip" in " ".join(str(a) for a in upgrade_args)
         mock_exec.assert_called_once()
+
+    def test_upgrade_version_unchanged_no_restart(self, tmp_path: Path) -> None:
+        from ductor_bot.__main__ import _upgrade
+
+        paths = _make_paths(tmp_path)
+        paths.ductor_home.mkdir(parents=True)
+
+        current = get_current_version()
+        upgrade_result = MagicMock(returncode=0, stdout="already up to date", stderr="")
+        verify_result = MagicMock(returncode=0, stdout=f"{current}\n", stderr="")
+
+        with (
+            patch("ductor_bot.infra.install.detect_install_mode", return_value="pipx"),
+            patch("ductor_bot.__main__.resolve_paths", return_value=paths),
+            patch(
+                "ductor_bot.__main__.subprocess.run",
+                side_effect=[upgrade_result, verify_result],
+            ),
+            patch("ductor_bot.__main__._re_exec_bot") as mock_exec,
+            patch("ductor_bot.__main__._stop_bot"),
+        ):
+            _upgrade()
+
+        # Should NOT restart when version didn't change
+        mock_exec.assert_not_called()
 
     def test_upgrade_fails_no_restart(self, tmp_path: Path) -> None:
         from ductor_bot.__main__ import _upgrade
