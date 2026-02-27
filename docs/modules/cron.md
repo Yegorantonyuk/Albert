@@ -79,7 +79,7 @@ Examples:
 
 - Claude: `claude -p --output-format json ... --no-session-persistence -- <prompt>`
 - Codex: `codex exec --json ... -- <prompt>`
-- Gemini: `gemini --output-format json --include-directories . ... -- <prompt>`
+- Gemini: `gemini -p "" --output-format json --include-directories . ...` (prompt passed via stdin)
 
 `bypassPermissions` behavior:
 

@@ -8,6 +8,7 @@ Provider-agnostic CLI execution layer for Claude Code, Codex, and Gemini.
 - `base.py`: `BaseCLI`, `CLIConfig`, `docker_wrap()`, Windows helpers
 - `factory.py`: provider factory (`claude` / `codex` / `gemini`)
 - `service.py`: `CLIService` gateway for orchestrator
+- `executor.py`: shared subprocess lifecycle helpers for provider wrappers
 - `claude_provider.py`: Claude subprocess wrapper
 - `codex_provider.py`: Codex subprocess wrapper
 - `gemini_provider.py`: Gemini subprocess wrapper

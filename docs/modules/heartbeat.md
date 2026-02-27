@@ -31,9 +31,9 @@ Helper:
 1. `config.heartbeat.enabled` must be true,
 2. heartbeat handler must be set.
 
-Then it starts background `_loop()`.
+Then it starts the background observer task (`BaseObserver.start()` -> `HeartbeatObserver._run()`).
 
-`_loop()`:
+`_run()`:
 
 1. sleep `interval_minutes`,
 2. skip if disabled/stopped,

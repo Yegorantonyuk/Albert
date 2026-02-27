@@ -5,6 +5,7 @@ Per-chat session lifecycle with JSON persistence and provider-isolated state.
 ## Files
 
 - `manager.py`: `ProviderSessionData`, `SessionData`, `SessionManager`
+- `named.py`: `NamedSession`, `NamedSessionRegistry`, generated-name helpers
 
 ## Data Model
 
@@ -90,6 +91,30 @@ CLI errors do not reset sessions in `SessionManager`.
 - chat-command resets are provider-targeted (`reset_provider_session`, used by `/new` and SIGKILL recovery),
 - normal runtime errors preserve session state so the next user message can resume.
 
+## Named sessions (`named.py`)
+
+`NamedSessionRegistry` stores named background-session metadata used by `/session` and `/sessions`.
+
+Model:
+
+- `name`, `chat_id`, `provider`, `model`
+- `session_id` (CLI resume token)
+- `prompt_preview`, `status`, `created_at`, `message_count`
+
+Status values:
+
+- `running`
+- `idle`
+- `ended`
+
+Behavior:
+
+- names are auto-generated adjective+noun strings (compact, no hyphen),
+- max sessions per chat: `MAX_SESSIONS_PER_CHAT = 10`,
+- sessions persist across restarts,
+- on startup, persisted `running` sessions are downgraded to `idle`,
+- updates are persisted after each response (`update_after_response`).
+
 ## Persistence
 
 File: `~/.ductor/sessions.json` (dict keyed by chat ID string).
@@ -98,3 +123,5 @@ File: `~/.ductor/sessions.json` (dict keyed by chat ID string).
 - save: atomic temp write + replace,
 - I/O runs in `asyncio.to_thread()`,
 - `dataclasses.asdict(SessionData)` serializes `provider_sessions` as nested JSON.
+
+Named-session file: `~/.ductor/named_sessions.json` (`{"sessions": [...]}`).

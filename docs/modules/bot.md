@@ -39,7 +39,7 @@ Orchestrator-routed commands:
 Message flow order:
 
 1. abort trigger check (`/stop` and bare abort words) before lock
-2. quick command bypass (`/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`)
+2. quick command bypass (`/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`)
 3. dedupe by `chat_id:message_id`
 4. acquire per-chat lock for normal messages
 5. queued messages get indicator + cancel button (`mq:<entry_id>`)
@@ -86,11 +86,13 @@ Handled namespaces in `TelegramBot._route_special_callback`:
 - `upg:*` upgrade callbacks
 - `ms:*` model selector
 - `crn:*` cron selector
+- `nsc:*` session selector
+- `ns:*` named-session follow-up callbacks from result buttons
 - `sf:*` / `sf!` file browser
 
 Lock behavior:
 
-- model selector, cron selector, and `sf!` file-request callbacks acquire per-chat lock
+- model selector, cron selector, session selector, and `sf!` file-request callbacks acquire per-chat lock
 - queue cancel, upgrade callbacks, and `sf:` directory navigation do not
 
 Generic callbacks are converted to user answer text and routed through normal message flow.
@@ -124,6 +126,7 @@ Implementation note:
 - heartbeat result handler
 - webhook result handler
 - webhook wake handler
+- session result handler
 
 Wake handler path (`_handle_webhook_wake`) acquires per-chat lock, routes prompt through orchestrator, then sends response.
 

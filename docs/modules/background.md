@@ -12,7 +12,7 @@ Named background session execution for `/session` (persistent sessions with foll
 Runs CLI tasks without blocking the chat flow, with persistent session support:
 
 - user sends `/session <prompt>` (optionally `/session @provider <prompt>`)
-- a named session is created (e.g. `swift-fox`)
+- a named session is created (e.g. `swiftfox`)
 - task executes asynchronously with session tracking
 - bot sends a tagged completion/failure/cancel message when done
 - follow-ups resume the same CLI session via `--resume`
@@ -35,8 +35,10 @@ Two execution paths:
 
 Delivered `BackgroundResult.status` values include:
 
-- success path: `success`
-- execution failures: `error:timeout`, `error:exit_<code>`, `error:cli_not_found`, `error:internal`
+- named-session success path: `ok`
+- legacy one-shot success path: `success`
+- named-session failures: `error:timeout`, `error:cli`, `error:internal`
+- legacy one-shot failures: `error:timeout`, `error:exit_<code>`, `error:cli_not_found`, `error:internal`
 - user abort path: `aborted`
 
 ## Wiring
@@ -59,4 +61,5 @@ Bot integration (`bot/app.py`):
 ## Limitations
 
 - task registry is in-memory (lost on restart), but named sessions persist in JSON
+- named session metadata persistence is handled by `session/named.py` (`~/.ductor/named_sessions.json`)
 - no retry queue; each submission is a single execution

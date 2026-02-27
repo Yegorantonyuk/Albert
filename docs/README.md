@@ -8,14 +8,15 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`)
 2. `docs/modules/setup_wizard.md` -- CLI commands, onboarding flow, upgrade flow.
 3. `docs/architecture.md` -- startup, routing, streaming, callbacks, background systems.
 4. `docs/config.md` -- config schema, merge behavior, provider/model resolution.
-5. `docs/modules/orchestrator.md` -- routing core and flow behavior.
-6. `docs/modules/bot.md` -- Telegram ingress, middleware, streaming UX, callbacks.
-7. `docs/modules/text.md` -- shared response text primitives used by bot + orchestrator.
-8. `docs/modules/api.md` -- direct WebSocket API ingress and HTTP file endpoints.
-9. `docs/modules/files.md` -- shared file parsing/storage/prompt helpers.
-10. `docs/modules/cli.md` -- provider wrappers, stream parsing, process control.
-11. `docs/modules/workspace.md` -- `~/.ductor` seeding, rule deployment/sync, runtime notices.
-12. Remaining module docs (`background`, `session`, `cron`, `webhook`, `heartbeat`, `cleanup`, `infra`, `supervisor`, `security`, `logging`, `skill_system`).
+5. `docs/modules/config_reload.md` -- config hot-reload behavior and restart boundaries.
+6. `docs/modules/orchestrator.md` -- routing core and flow behavior.
+7. `docs/modules/bot.md` -- Telegram ingress, middleware, streaming UX, callbacks.
+8. `docs/modules/text.md` -- shared response text primitives used by bot + orchestrator.
+9. `docs/modules/api.md` -- direct WebSocket API ingress and HTTP file endpoints.
+10. `docs/modules/files.md` -- shared file parsing/storage/prompt helpers.
+11. `docs/modules/cli.md` -- provider wrappers, stream parsing, process control.
+12. `docs/modules/workspace.md` -- `~/.ductor` seeding, rule deployment/sync, runtime notices.
+13. Remaining module docs (`background`, `session`, `cron`, `webhook`, `heartbeat`, `cleanup`, `infra`, `supervisor`, `security`, `logging`, `skill_system`).
 
 ## System in 60 Seconds
 
@@ -24,9 +25,10 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`)
 - `ductor_bot/text/`: shared user-facing response format/builders (`fmt`, `/new` + `/stop` text, session-error hints).
 - `ductor_bot/files/`: shared file tag parsing, MIME detection/classification, storage naming, transport-agnostic media prompt builder.
 - `ductor_bot/orchestrator/`: command dispatch, directives/hooks, normal + heartbeat flows, observer/server wiring.
+- `ductor_bot/config_reload.py`: centralized hot-reload watcher for safe `config.json` fields.
 - `ductor_bot/cli/`: Claude/Codex/Gemini wrappers, stream-event normalization, process registry, auth detection, model caches.
 - `ductor_bot/background/`: named background sessions (`/session`) with follow-ups and result delivery.
-- `ductor_bot/session/`: per-chat session lifecycle with provider-isolated buckets in `sessions.json`.
+- `ductor_bot/session/`: per-chat provider-isolated session state (`sessions.json`) plus named-session registry (`named_sessions.json`).
 - `ductor_bot/cron/`: in-process scheduler for `cron_jobs.json` with task overrides, quiet hours, dependency queue.
 - `ductor_bot/webhook/`: HTTP ingress (`/hooks/{hook_id}`) with `bearer`/`hmac`, `wake`/`cron_task`, and shared dependency queue.
 - `ductor_bot/heartbeat/`: periodic proactive checks in active sessions.
@@ -47,6 +49,7 @@ Runtime behavior note:
 - [Configuration](config.md)
 - Module docs:
   - [setup_wizard](modules/setup_wizard.md)
+  - [config_reload](modules/config_reload.md)
   - [bot](modules/bot.md)
   - [background](modules/background.md)
   - [api](modules/api.md)

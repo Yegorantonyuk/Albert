@@ -211,6 +211,26 @@ Runtime note (`Orchestrator._start_api_server` + `ApiServer._authenticate`):
 - per-connection auth payload may override via `{"type":"auth","chat_id":...}`,
 - clients can override only for that connection; persisted default stays in config.
 
+## Runtime hot-reload (`config_reload.py`)
+
+`Orchestrator.create()` starts `ConfigReloader`, which polls `config.json` every 5 seconds, validates it with `AgentConfig`, diffs top-level fields, and applies safe changes without restart.
+
+Hot-reloadable top-level fields:
+
+- `model`, `provider`, `reasoning_effort`
+- `cli_timeout`, `max_budget_usd`, `max_turns`, `max_session_messages`
+- `idle_timeout_minutes`, `session_age_warning_hours`, `daily_reset_hour`, `daily_reset_enabled`
+- `permission_mode`, `file_access`, `user_timezone`
+- `streaming`, `heartbeat`, `cleanup`, `cli_parameters`
+
+Restart-required top-level fields:
+
+- `telegram_token`, `allowed_user_ids`
+- `docker`, `api`, `webhooks`
+- `ductor_home`, `log_level`, `gemini_api_key`
+
+If a changed field is not in the hot-reload allowlist, it is treated as restart-required.
+
 ## Model Resolution
 
 `ModelRegistry` (`ductor_bot/config.py`):
@@ -219,7 +239,7 @@ Runtime note (`Orchestrator._start_api_server` + `ApiServer._authenticate`):
 - Gemini aliases are hardcoded: `auto`, `pro`, `flash`, `flash-lite`.
 - Runtime Gemini models are discovered from local Gemini CLI files at startup.
 - Provider resolution (`provider_for(model_id)`):
-  - Claude when in `_CLAUDE_MODELS`,
+  - Claude when in `CLAUDE_MODELS`,
   - Gemini when in aliases/discovered set or when model looks like `gemini-*`/`auto-gemini-*`,
   - otherwise Codex.
 

@@ -19,6 +19,7 @@ Important runtime paths:
 - `workspace`: `~/.ductor/workspace`
 - `config_path`: `~/.ductor/config/config.json`
 - `sessions_path`: `~/.ductor/sessions.json`
+- `named_sessions_path`: `~/.ductor/named_sessions.json`
 - `cron_jobs_path`: `~/.ductor/cron_jobs.json`
 - `webhooks_path`: `~/.ductor/webhooks.json`
 - `logs_dir`: `~/.ductor/logs`
@@ -34,10 +35,11 @@ Important runtime paths:
 3. `_sync_home_defaults(paths)`
 4. ensure required directories
 5. `RulesSelector(paths).deploy_rules()`
-6. `sync_rule_files(paths.workspace)`
-7. `_smart_merge_config(paths)`
-8. `_clean_orphan_symlinks(paths)`
-9. `sync_skills(paths)`
+6. `ensure_task_rule_files(paths.cron_tasks_dir)`
+7. `sync_rule_files(paths.workspace)`
+8. `_smart_merge_config(paths)`
+9. `_clean_orphan_symlinks(paths)`
+10. `sync_skills(paths)`
 
 Idempotent by design (called from multiple startup paths).
 
@@ -109,6 +111,11 @@ Per directory:
 - copy to outdated existing siblings (missing siblings are not created)
 
 Background watcher: `watch_rule_files(workspace, interval=10s)`.
+
+Watcher detail per cycle:
+
+1. `ensure_task_rule_files(cron_tasks_dir)` backfills missing provider rule files in existing task folders.
+2. `sync_rule_files(workspace)` propagates newest content to older sibling rule files.
 
 ## Runtime environment injection
 

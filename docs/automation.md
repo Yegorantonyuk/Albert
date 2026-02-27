@@ -16,16 +16,16 @@ ductor automation systems:
 
 Key properties:
 
-- auto-generates memorable names (e.g. `swift-fox`, `tall-newt`)
+- auto-generates memorable compact names (e.g. `swiftfox`, `tallnewt`)
 - supports provider isolation: `/session @codex <prompt>`
 - follow-up in foreground: `@session-name <message>`
 - follow-up in background: `/session @session-name <message>`
 - session management: `/sessions` (list, end, end all)
 - `/stop` cancels all sessions for the chat
 - max 5 concurrent tasks, max 10 sessions per chat
-- `/status` shows active sessions
+- `/status` shows active background tasks
 
-Status values: `success`, `error:timeout`, `error:exit_<code>`, `error:cli_not_found`, `error:internal`, `aborted`.
+Status values for named-session runs: `ok`, `error:timeout`, `error:cli`, `error:internal`, `aborted`.
 
 ## Cron jobs
 

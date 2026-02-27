@@ -26,6 +26,7 @@ First run auto-starts onboarding and writes config to `~/.ductor/config/config.j
 Primary runtime files/directories:
 
 - `~/.ductor/sessions.json`
+- `~/.ductor/named_sessions.json`
 - `~/.ductor/cron_jobs.json`
 - `~/.ductor/webhooks.json`
 - `~/.ductor/workspace/`
@@ -61,6 +62,7 @@ Background systems run in-process:
 - cleanup
 - codex model cache
 - gemini model cache
+- config hot-reloader (`config.json` poller)
 - rule sync
 - skill sync
 - update check (upgradeable installs only)

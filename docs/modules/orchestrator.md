@@ -6,12 +6,13 @@ Central routing layer between ingress transports (Telegram + optional API server
 
 - `core.py`: `Orchestrator` lifecycle, routing, observer wiring, shutdown
 - `registry.py`: `CommandRegistry`, `OrchestratorResult`
-- `commands.py`: command handlers (`/status`, `/model`, `/cron`, `/diagnose`, `/upgrade`, ...)
+- `commands.py`: command handlers (`/status`, `/model`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, ...)
 - `flows.py`: normal flow, streaming flow, heartbeat flow, session-recovery/error handling
 - `directives.py`: leading `@...` directive parser
 - `hooks.py`: hook registry + `MAINMEMORY_REMINDER`
 - `model_selector.py`: interactive model/provider switch wizard (`ms:*`)
 - `cron_selector.py`: interactive cron toggles (`crn:*`)
+- `session_selector.py`: interactive named-session manager (`nsc:*`)
 - API server integration points in `core.py`: `_start_api_server()`, `_api_stop`, shutdown stop path
 
 ## Startup (`Orchestrator.create`)
@@ -35,6 +36,7 @@ Workspace precondition:
 11. if `config.api.enabled`: start `ApiServer` via `_start_api_server`
 12. start rule sync watcher (`watch_rule_files`)
 13. start skill sync watcher (`watch_skill_sync`)
+14. start `ConfigReloader` (`config.json` poll every 5s)
 
 ## Routing entry points
 
@@ -61,6 +63,7 @@ Registered commands:
 - `/cron`
 - `/diagnose`
 - `/upgrade`
+- `/sessions`
 
 `/stop` is intentionally not registered here; abort is middleware/bot-level behavior.
 
@@ -154,6 +157,14 @@ Callback namespace: `crn:`
 - supports paging, refresh, per-job toggle, bulk all-on/all-off
 - toggles persist in `CronManager` and call `CronObserver.reschedule_now()`
 
+## Session selector (`session_selector.py`)
+
+Callback namespace: `nsc:`
+
+- `nsc:r` refresh
+- `nsc:end:<name>` end one named session
+- `nsc:endall` end all named sessions
+
 ## Session wiring (`/session`)
 
 - `submit_named_session(...)` creates a named session and submits to `BackgroundObserver`
@@ -196,6 +207,7 @@ Clients can still override session per connection via auth payload `{"type":"aut
 1. stop API server if running
 2. cancel rule/skill watcher tasks
 3. `cleanup_ductor_links(paths)`
-4. stop background/heartbeat/webhook/cron/cleanup observers
-5. stop codex and gemini cache observers
-6. teardown Docker container (if managed)
+4. stop `ConfigReloader`
+5. stop background/heartbeat/webhook/cron/cleanup observers
+6. stop codex and gemini cache observers
+7. teardown Docker container (if managed)

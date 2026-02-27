@@ -8,12 +8,12 @@ Telegram Update
   -> AuthMiddleware (allowlist)
   -> SequentialMiddleware (message updates only)
        - exact /stop or bare abort keyword: kill active CLI process(es) + drain pending queue
-       - quick commands (/status /memory /cron /diagnose /model /showfiles): lock bypass
+       - quick commands (/status /memory /cron /diagnose /model /showfiles /sessions): lock bypass
        - otherwise: dedupe + per-chat lock (+ queue tracking)
   -> TelegramBot handler
        - /start /help /info /showfiles /stop /restart /new /session /sessions
        - normal text/media -> Orchestrator
-       - callback routes (model selector, cron selector, file browser, upgrade, queue cancel)
+       - callback routes (model selector, cron selector, session selector, file browser, named-session buttons, upgrade, queue cancel)
   -> Orchestrator
        - slash command -> CommandRegistry
        - directives (@...)
@@ -39,6 +39,7 @@ Background systems:
 - `GeminiCacheObserver`: periodic Gemini model-cache refresh (`~/.ductor/config/gemini_models.json`).
 - `CodexCacheObserver`: periodic Codex model-cache refresh (`~/.ductor/config/codex_models.json`).
 - `UpdateObserver`: periodic PyPI version check + Telegram notification (upgradeable installs only).
+- `ConfigReloader`: hot-reload watcher for safe `config.json` fields.
 - Rule-sync task: keeps existing `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` siblings mtime-synced inside `~/.ductor/workspace/`.
 - Skill-sync task: syncs skills across `~/.ductor/workspace/skills/`, `~/.claude/skills/`, `~/.codex/skills/`, `~/.gemini/skills/`.
 
@@ -68,7 +69,7 @@ Default path:
 1. Create orchestrator via `Orchestrator.create(config)`.
 2. Fetch bot identity (`get_me`).
 3. Consume restart sentinel and notify chat if present.
-4. Attach cron, heartbeat, webhook result handlers and webhook wake handler.
+4. Attach cron, heartbeat, webhook, and session result handlers + webhook wake handler.
 5. Consume upgrade sentinel and notify chat if present.
 6. Start `UpdateObserver` only for upgradeable installs.
 7. Sync Telegram command list.
@@ -89,15 +90,16 @@ Default path:
 11. Start cron, heartbeat, webhook, cleanup observers.
 12. If `api.enabled=true`: start `ApiServer` (auto-generate token when empty, wire message/abort handlers and file context).
 13. Start rule-sync and skill-sync watcher tasks.
+14. Start `ConfigReloader` (`config.json` poll every 5s; hot fields applied, restart-required fields logged).
 
 ## Message Routing
 
 ### Command ownership
 
-- Bot-level handlers: `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/restart`, `/new`.
-- Orchestrator command registry: `/new`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`.
+- Bot-level handlers: `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/restart`, `/new`, `/session`, `/sessions`.
+- Orchestrator command registry: `/new`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`.
 - `/stop` is middleware/bot-local and does not route through orchestrator command dispatch.
-- Quick-command bypass applies to `/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`.
+- Quick-command bypass applies to `/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`.
 - `/showfiles` is handled directly in bot layer.
 - `/model` bypass has busy check: when active work/queue exists, it returns immediate "agent is working" feedback.
 
@@ -106,7 +108,7 @@ Default path:
 - Only directives at message start are parsed.
 - Model directive syntax: `@<model-id>`.
 - Known model IDs come from:
-  - `_CLAUDE_MODELS` (`haiku`, `sonnet`, `opus`)
+  - `CLAUDE_MODELS` (`haiku`, `sonnet`, `opus`)
   - `_GEMINI_ALIASES` (`auto`, `pro`, `flash`, `flash-lite`)
   - dynamically discovered Gemini model IDs from local Gemini CLI files.
 - Other `@key` / `@key=value` directives are collected as raw directives.
@@ -188,6 +190,8 @@ Additional HTTP endpoints:
    - `upg:*` upgrade flow,
    - `ms:*` model selector,
    - `crn:*` cron selector,
+   - `nsc:*` session selector,
+   - `ns:*` named-session follow-up buttons,
    - `sf:*` / `sf!` file browser.
 4. generic callback path:
    - append `[USER ANSWER] ...` when possible,
@@ -202,6 +206,7 @@ Lock usage is path-dependent (e.g., queue cancel and upgrade callbacks are handl
 
 - `TelegramBot._on_session(...)` creates a named session via `Orchestrator.submit_named_session(...)`.
 - `BackgroundObserver` enforces max 5 active tasks per chat and runs tasks asynchronously.
+- `NamedSessionRegistry` enforces max 10 named sessions per chat and persists to `~/.ductor/named_sessions.json`.
 - Named sessions use `CLIService.execute()` with `resume_session` for follow-up persistence.
 - Follow-ups: `@session-name <message>` (foreground streaming) or `/session @session-name <message>` (background).
 - Completion callback (`TelegramBot._on_session_result`) sends a tagged Telegram message with session name and provider.

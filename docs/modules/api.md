@@ -334,15 +334,19 @@ Commands registered in the orchestrator's command registry work automatically:
 
 - `/new` -- reset active provider session
 - `/status` -- show session status
-- `/model` / `/model <name>` -- show or switch model
+- `/model` -- returns selector summary text (Telegram selector buttons are not available over API)
+- `/model <name>` -- switch model directly
 - `/memory` -- memory operations
-- `/cron` -- cron management
+- `/cron` -- returns cron summary text (Telegram selector buttons are not available over API)
 - `/diagnose` -- diagnostics
+- `/sessions` -- returns session summary text (Telegram selector buttons are not available over API)
 - `/upgrade` -- returns upgrade-check text, but upgrade action buttons are Telegram callback-based (`upg:*`)
 
 These are sent as encrypted messages (`encrypted({"type": "message", "text": "/status"})`).
 
-Commands handled exclusively by Telegram (`/start`, `/help`, `/info`, `/showfiles`, `/restart`) are not available through the API.
+Interactive selector keyboards are Telegram-specific callback flows (`ms:*`, `crn:*`, `nsc:*`), so API clients receive text only for those commands.
+
+Commands handled exclusively by Telegram (`/start`, `/help`, `/info`, `/showfiles`, `/restart`, `/session`) are not available through the API.
 
 ## Startup flow
 
