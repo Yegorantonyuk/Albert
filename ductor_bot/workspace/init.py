@@ -43,11 +43,13 @@ _ZONE2_FILES = frozenset({"CLAUDE.md", "AGENTS.md", "GEMINI.md"})
 # Directories where ALL .py files are Zone 2 (framework-managed).
 # User-owned scripts should go in tools/user_tools/ (Zone 3).
 # Paths are relative to home_defaults root (include workspace/ prefix).
-_ZONE2_PY_DIRS = frozenset({
-    "workspace/tools/cron_tools",
-    "workspace/tools/webhook_tools",
-    "workspace/tools/agent_tools",
-})
+_ZONE2_PY_DIRS = frozenset(
+    {
+        "workspace/tools/cron_tools",
+        "workspace/tools/webhook_tools",
+        "workspace/tools/agent_tools",
+    }
+)
 
 # Rule templates are deployed separately by RulesSelector
 _SKIP_FILES = frozenset(
@@ -84,8 +86,11 @@ def _sync_home_defaults(paths: DuctorPaths) -> None:
         logger.warning("Home defaults directory not found: %s", paths.home_defaults)
         return
     _walk_and_copy(paths.home_defaults, paths.ductor_home)
-    # Ensure logs dir exists (not in template because it holds no files)
-    paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    # Ensure logs dir exists for the main agent only.  Sub-agents share the
+    # central log file and don't need their own logs directory.
+    # Sub-agent homes live under <main_home>/agents/<name>/.
+    if paths.ductor_home.parent.name != "agents":
+        paths.logs_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _should_skip_entry(entry: Path) -> bool:
@@ -280,7 +285,6 @@ _REQUIRED_DIRS = (
     "workspace/telegram_files",
     "workspace/skills",
     "config",
-    "logs",
 )
 
 
@@ -360,16 +364,32 @@ _IDENTITY_MAIN = """
 
 - You are the primary agent and coordinator in a multi-agent system.
 - You can create, manage, and communicate with sub-agents.
-- Sub-agents each have their own Telegram bot, workspace, and memory.
+- Each sub-agent has its own **Telegram bot** with a separate chat.
 
-### Communication Tools
+### How the user interacts with sub-agents
 
-- **Synchronous**: `python3 tools/agent_tools/ask_agent.py TARGET "message"` — blocks until response
-- **Asynchronous**: `python3 tools/agent_tools/ask_agent_async.py TARGET "message"` — returns immediately, response delivered via Telegram
-- **List agents**: `python3 tools/agent_tools/list_agents.py`
-- **Shared knowledge**: `python3 tools/agent_tools/edit_shared_knowledge.py`
+The user has TWO ways to use a sub-agent:
 
-Use async communication for tasks that may take more than a few seconds.
+1. **Direct chat**: The user opens the sub-agent's Telegram bot and chats \
+directly. This is the primary way — each sub-agent is a full independent \
+assistant with its own memory and workspace.
+2. **Delegation via you**: The user asks YOU to delegate a task. You use \
+the agent tools below to send the task. The response comes back to YOUR \
+chat (never to the sub-agent's chat).
+
+**After creating a sub-agent, always tell the user they can open the \
+sub-agent's Telegram chat directly to talk to it.** Do not suggest \
+Python tool commands to the user — those are for YOU to use internally.
+
+### Agent tools (for YOUR internal use)
+
+- `python3 tools/agent_tools/ask_agent.py TARGET "message"` — sync, blocks
+- `python3 tools/agent_tools/ask_agent_async.py TARGET "message"` — async
+- `python3 tools/agent_tools/list_agents.py`
+- `python3 tools/agent_tools/edit_shared_knowledge.py`
+
+Responses from these tools always come back to YOU, never to the sub-agent's chat.
+Use async for tasks that may take more than a few seconds.
 """
 
 _IDENTITY_SUB = """
@@ -386,11 +406,14 @@ _IDENTITY_SUB = """
 
 ### Communication Tools
 
-- **Synchronous**: `python3 tools/agent_tools/ask_agent.py TARGET "message"` — blocks until response
-- **Asynchronous**: `python3 tools/agent_tools/ask_agent_async.py TARGET "message"` — returns immediately, response delivered via Telegram
+- **Synchronous**: `python3 tools/agent_tools/ask_agent.py TARGET "message"` — blocks until response, answer returned to you
+- **Asynchronous**: `python3 tools/agent_tools/ask_agent_async.py TARGET "message"` — returns immediately, answer delivered back to YOUR chat when ready
+
+**Important**: Responses always come back to the calling agent, never to \
+a different chat. There is no way to send answers to another agent's \
+Telegram chat via these tools.
 
 When another agent sends you a message, you'll see it wrapped in `[INTER-AGENT MESSAGE]` markers.
-When you receive an async response, it will be wrapped in `[ASYNC INTER-AGENT RESPONSE]` markers.
 Respond directly and concisely to inter-agent requests.
 """
 
@@ -413,9 +436,7 @@ def inject_runtime_environment(
     Called once after workspace init when the Docker state is known.
     """
     env_notice = (
-        _DOCKER_NOTICE.format(container=docker_container)
-        if docker_container
-        else _HOST_NOTICE
+        _DOCKER_NOTICE.format(container=docker_container) if docker_container else _HOST_NOTICE
     )
     identity_notice = _build_identity_notice(agent_name)
 

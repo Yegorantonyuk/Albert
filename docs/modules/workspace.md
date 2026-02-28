@@ -46,6 +46,7 @@ Idempotent by design (called from multiple startup paths).
 Directory creation note:
 
 - `workspace/api_files/` is not in `_REQUIRED_DIRS`; it is created lazily on first API upload via `prepare_destination(...)`.
+- sub-agent homes do not create `logs/` by default; all agents write to the main home log file `~/.ductor/logs/agent.log`.
 
 ## Zone copy rules (`_walk_and_copy`)
 
@@ -55,6 +56,7 @@ Directory creation note:
 - `.py` files in:
   - `workspace/tools/cron_tools/`
   - `workspace/tools/webhook_tools/`
+  - `workspace/tools/agent_tools/`
 
 Special case:
 
@@ -119,12 +121,13 @@ Watcher detail per cycle:
 
 ## Runtime environment injection
 
-`inject_runtime_environment(paths, docker_container=...)` appends one notice section to each existing workspace rule file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`):
+`inject_runtime_environment(paths, docker_container=...)` appends two sections to each existing workspace rule file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`):
 
+- `## Multi-Agent Identity` (main/sub-agent context + communication hints)
 - Docker mode notice (`/ductor` mount)
 - host mode warning (no sandbox)
 
-Marker `## Runtime Environment` prevents duplicate insertion.
+Duplicate prevention: injection is skipped when either marker already exists (`## Multi-Agent Identity` or `## Runtime Environment`).
 
 ## Cron task folders (`cron_tasks.py`)
 

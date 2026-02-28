@@ -6,6 +6,7 @@ import asyncio
 import logging
 import signal
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,15 @@ if TYPE_CHECKING:
     from ductor_bot.orchestrator.core import Orchestrator
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class StreamingCallbacks:
+    """Bundle of optional streaming callbacks passed through flow functions."""
+
+    on_text_delta: Callable[[str], Awaitable[None]] | None = field(default=None)
+    on_tool_activity: Callable[[str], Awaitable[None]] | None = field(default=None)
+    on_system_status: Callable[[str | None], Awaitable[None]] | None = field(default=None)
 
 
 async def _prepare_normal(
@@ -154,38 +164,46 @@ def _needs_session_recovery(response: AgentResponse) -> bool:
     return _is_sigkill(response) or _is_invalid_session(response)
 
 
-async def _recover_session(  # noqa: PLR0913
+@dataclass(slots=True)
+class _RecoveryContext:
+    """Context for session recovery."""
+
+    reason: str
+    model_override: str | None
+    streaming: bool = False
+    cbs: StreamingCallbacks = field(default_factory=StreamingCallbacks)
+
+
+async def _recover_session(
     orch: Orchestrator,
     chat_id: int,
     text: str,
-    *,
-    reason: str,
-    model_override: str | None,
-    streaming: bool,
-    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
-    on_tool_activity: Callable[[str], Awaitable[None]] | None = None,
-    on_system_status: Callable[[str | None], Awaitable[None]] | None = None,
+    ctx: _RecoveryContext,
 ) -> tuple[AgentRequest, SessionData, AgentResponse]:
-    """Reset the active provider session and retry once."""
-    logger.warning("recovery.%s chat=%s action=retry", reason, chat_id)
-    model_name = model_override or orch._config.model
+    """Reset the active provider session and retry once.
+
+    When callbacks are set in *ctx.cbs*, the retry uses streaming execution.
+    """
+    logger.warning("recovery.%s chat=%s action=retry", ctx.reason, chat_id)
+    model_name = ctx.model_override or orch._config.model
     provider_name = orch._models.provider_for(model_name)
     await orch._process_registry.kill_all(chat_id)
     orch._process_registry.clear_abort(chat_id)
     await orch._sessions.reset_provider_session(chat_id, provider=provider_name, model=model_name)
 
-    if reason == "invalid_session" and on_text_delta is not None:
-        await on_text_delta(f"{_SESSION_RECOVERED_MSG}\n\n")
-    elif on_system_status is not None:
-        await on_system_status("recovering")
+    cb = ctx.cbs
+    if ctx.reason == "invalid_session" and cb.on_text_delta is not None:
+        await cb.on_text_delta(f"{_SESSION_RECOVERED_MSG}\n\n")
+    elif cb.on_system_status is not None:
+        await cb.on_system_status("recovering")
 
-    request, session = await _prepare_normal(orch, chat_id, text, model_override=model_override)
-    if streaming:
+    request, session = await _prepare_normal(orch, chat_id, text, model_override=ctx.model_override)
+    if ctx.streaming:
         response = await orch._cli_service.execute_streaming(
             request,
-            on_text_delta=on_text_delta,
-            on_tool_activity=on_tool_activity,
-            on_system_status=on_system_status,
+            on_text_delta=cb.on_text_delta,
+            on_tool_activity=cb.on_tool_activity,
+            on_system_status=cb.on_system_status,
         )
     else:
         response = await orch._cli_service.execute(request)
@@ -247,9 +265,8 @@ async def normal(
     if not orch._process_registry.was_aborted(chat_id) and _needs_session_recovery(response):
         session_recovered = _is_invalid_session(response)
         reason = "invalid_session" if session_recovered else "sigkill"
-        request, session, response = await _recover_session(
-            orch, chat_id, text, reason=reason, model_override=model_override, streaming=False
-        )
+        ctx = _RecoveryContext(reason=reason, model_override=model_override)
+        request, session, response = await _recover_session(orch, chat_id, text, ctx)
     if orch._process_registry.was_aborted(chat_id):
         logger.info("Normal flow aborted by user")
         return OrchestratorResult(text="")
@@ -273,15 +290,13 @@ async def normal(
     return result
 
 
-async def normal_streaming(  # noqa: PLR0913
+async def normal_streaming(
     orch: Orchestrator,
     chat_id: int,
     text: str,
     *,
     model_override: str | None = None,
-    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
-    on_tool_activity: Callable[[str], Awaitable[None]] | None = None,
-    on_system_status: Callable[[str | None], Awaitable[None]] | None = None,
+    cbs: StreamingCallbacks | None = None,
 ) -> OrchestratorResult:
     """Handle normal conversation with streaming output."""
     logger.info("Streaming flow starting")
@@ -291,25 +306,17 @@ async def normal_streaming(  # noqa: PLR0913
         logger.warning("Gemini API-key mode without configured ductor key")
         return warning
 
+    cb = cbs or StreamingCallbacks()
     response = await orch._cli_service.execute_streaming(
         request,
-        on_text_delta=on_text_delta,
-        on_tool_activity=on_tool_activity,
-        on_system_status=on_system_status,
+        on_text_delta=cb.on_text_delta,
+        on_tool_activity=cb.on_tool_activity,
+        on_system_status=cb.on_system_status,
     )
     if not orch._process_registry.was_aborted(chat_id) and _needs_session_recovery(response):
         reason = "invalid_session" if _is_invalid_session(response) else "sigkill"
-        request, session, response = await _recover_session(
-            orch,
-            chat_id,
-            text,
-            reason=reason,
-            model_override=model_override,
-            streaming=True,
-            on_text_delta=on_text_delta,
-            on_tool_activity=on_tool_activity,
-            on_system_status=on_system_status,
-        )
+        ctx = _RecoveryContext(reason=reason, model_override=model_override, streaming=True, cbs=cb)
+        request, session, response = await _recover_session(orch, chat_id, text, ctx)
     if orch._process_registry.was_aborted(chat_id):
         logger.info("Streaming flow aborted by user")
         return OrchestratorResult(text="")
@@ -381,11 +388,11 @@ def _build_agent_roster(orch: Orchestrator) -> str:
 
     Returns empty string if no supervisor or only one agent is online.
     """
-    supervisor = getattr(orch, "_supervisor", None)
+    supervisor = orch._supervisor
     if supervisor is None:
         return ""
 
-    bus = getattr(supervisor, "_bus", None) or getattr(supervisor, "bus", None)
+    bus = supervisor.bus
     if bus is None:
         return ""
 
@@ -466,15 +473,13 @@ async def named_session_flow(
     return OrchestratorResult(text=f"{tag}{response.result}")
 
 
-async def named_session_streaming(  # noqa: PLR0913
+async def named_session_streaming(
     orch: Orchestrator,
     chat_id: int,
     session_name: str,
     text: str,
     *,
-    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
-    on_tool_activity: Callable[[str], Awaitable[None]] | None = None,
-    on_system_status: Callable[[str | None], Awaitable[None]] | None = None,
+    cbs: StreamingCallbacks | None = None,
 ) -> OrchestratorResult:
     """Handle a foreground streaming follow-up to a named session."""
     ns = orch._named_sessions.get(chat_id, session_name)
@@ -489,6 +494,7 @@ async def named_session_streaming(  # noqa: PLR0913
             text=f"Session '{session_name}' is still processing. Wait or use /stop to cancel."
         )
 
+    cb = cbs or StreamingCallbacks()
     tag = f"**[{session_name} | {ns.provider}]**\n"
     ns.status = "running"
     request = AgentRequest(
@@ -505,17 +511,17 @@ async def named_session_streaming(  # noqa: PLR0913
 
     async def _tagged_text_delta(chunk: str) -> None:
         nonlocal tag_sent
-        if on_text_delta is not None:
+        if cb.on_text_delta is not None:
             if not tag_sent:
-                await on_text_delta(tag)
+                await cb.on_text_delta(tag)
                 tag_sent = True
-            await on_text_delta(chunk)
+            await cb.on_text_delta(chunk)
 
     response = await orch._cli_service.execute_streaming(
         request,
         on_text_delta=_tagged_text_delta,
-        on_tool_activity=on_tool_activity,
-        on_system_status=on_system_status,
+        on_tool_activity=cb.on_tool_activity,
+        on_system_status=cb.on_system_status,
     )
 
     if orch._process_registry.was_aborted(chat_id):

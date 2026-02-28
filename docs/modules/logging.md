@@ -4,7 +4,7 @@ Context-aware logging infrastructure used by all runtime modules.
 
 ## Files
 
-- `ductor_bot/log_context.py`: `ContextVar` state (`operation`, `chat_id`, `session_id`) + `ContextFilter`.
+- `ductor_bot/log_context.py`: `ContextVar` state (`agent_name`, `operation`, `chat_id`, `session_id`) + `ContextFilter`.
 - `ductor_bot/logging_config.py`: root logger setup (console + rotating file via queue listener).
 
 ## Context Model
@@ -12,7 +12,7 @@ Context-aware logging infrastructure used by all runtime modules.
 `ContextFilter` injects `record.ctx` into every log line as:
 
 ```text
-[operation:chat_id:session_id_8]
+[agent_name:operation:chat_id:session_id_8]
 ```
 
 Missing values are omitted.
@@ -25,8 +25,13 @@ Operation codes currently used:
 - `hb`: heartbeat run (`HeartbeatObserver._run_for_chat`)
 - `wh`: webhook request / webhook wake dispatch
 - `api`: direct API WebSocket session/message handling (`ApiServer._session_loop`, `_route_text_message`)
+- `ia-async`: async inter-agent result processing (`TelegramBot.on_async_interagent_result`)
 
 `set_log_context()` updates the context for the current async task; child tasks inherit current context.
+
+Multi-agent note:
+
+- `AgentSupervisor` sets `agent_name` context (`main`, sub-agent name), so all agents share one log file with per-line agent attribution.
 
 ## Output Sinks
 

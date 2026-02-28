@@ -164,6 +164,58 @@ async def cmd_upgrade(_orch: Orchestrator, _chat_id: int, _text: str) -> Orchest
     )
 
 
+def _build_codex_cache_block(orch: Orchestrator) -> str:
+    """Build the Codex model cache section for /diagnose."""
+    if not orch._codex_cache_observer:
+        return "\n🔄 Codex Model Cache: Observer not initialized"
+    cache = orch._codex_cache_observer.get_cache()
+    if not cache or not cache.models:
+        return "\n🔄 Codex Model Cache: Not loaded"
+    default_model = next((m.id for m in cache.models if m.is_default), "N/A")
+    return (
+        f"\n🔄 Codex Model Cache:\n"
+        f"  Last updated: {cache.last_updated}\n"
+        f"  Models cached: {len(cache.models)}\n"
+        f"  Default model: {default_model}"
+    )
+
+
+def _build_diagnose_health_block(orch: Orchestrator) -> str:
+    """Build the multi-agent health section for /diagnose."""
+    supervisor = orch._supervisor
+    if supervisor is None:
+        return ""
+    status_icon = {"running": "●", "starting": "◐", "crashed": "✖", "stopped": "○"}
+    agent_lines = ["\n**Multi-Agent Health:**"]
+    for name in sorted(supervisor.health.keys()):
+        h = supervisor.health[name]
+        icon = status_icon.get(h.status, "?")
+        role = "main" if name == "main" else "sub"
+        line = f"  {icon} `{name}` [{role}] — {h.status}"
+        if h.status == "running" and h.uptime_human:
+            line += f" ({h.uptime_human})"
+        if h.restart_count > 0:
+            line += f" | restarts: {h.restart_count}"
+        if h.status == "crashed" and h.last_crash_error:
+            line += f"\n      `{h.last_crash_error[:100]}`"
+        agent_lines.append(line)
+    return "\n".join(agent_lines)
+
+
+def _resolve_log_path(orch: Orchestrator) -> Path:
+    """Return the best available log file path.
+
+    Sub-agents don't have their own log files — fall back to the central
+    log in the main ductor home (parent of ``agents/<name>``).
+    """
+    log_path = orch.paths.logs_dir / "agent.log"
+    if not log_path.exists():
+        main_logs = orch.paths.ductor_home.parent.parent / "logs" / "agent.log"
+        if main_logs.exists():
+            return main_logs
+    return log_path
+
+
 async def cmd_diagnose(orch: Orchestrator, _chat_id: int, _text: str) -> OrchestratorResult:
     """Handle /diagnose."""
     logger.info("Diagnose requested")
@@ -175,60 +227,51 @@ async def cmd_diagnose(orch: Orchestrator, _chat_id: int, _text: str) -> Orchest
         f"Effective runtime: {effective_provider} / {effective_model}"
     )
 
-    # Codex model cache status
-    cache_lines: list[str] = []
-    if orch._codex_cache_observer:
-        cache = orch._codex_cache_observer.get_cache()
-        if cache and cache.models:
-            cache_lines.append("\n🔄 Codex Model Cache:")
-            cache_lines.append(f"  Last updated: {cache.last_updated}")
-            cache_lines.append(f"  Models cached: {len(cache.models)}")
-            default_model = next((m.id for m in cache.models if m.is_default), "N/A")
-            cache_lines.append(f"  Default model: {default_model}")
-        else:
-            cache_lines.append("\n🔄 Codex Model Cache: Not loaded")
-    else:
-        cache_lines.append("\n🔄 Codex Model Cache: Observer not initialized")
-    cache_block = "\n".join(cache_lines)
+    cache_block = _build_codex_cache_block(orch)
+    agent_block = _build_diagnose_health_block(orch)
 
-    # Multi-agent health
-    agent_block = ""
-    supervisor = getattr(orch, "_supervisor", None)
-    if supervisor is not None:
-        _STATUS_ICON = {
-            "running": "●",
-            "starting": "◐",
-            "crashed": "✖",
-            "stopped": "○",
-        }
-        agent_lines = ["\n**Multi-Agent Health:**"]
-        for name in sorted(supervisor.health.keys()):
-            h = supervisor.health[name]
-            icon = _STATUS_ICON.get(h.status, "?")
-            role = "main" if name == "main" else "sub"
-            line = f"  {icon} `{name}` [{role}] — {h.status}"
-            if h.status == "running" and h.uptime_human:
-                line += f" ({h.uptime_human})"
-            if h.restart_count > 0:
-                line += f" | restarts: {h.restart_count}"
-            if h.status == "crashed" and h.last_crash_error:
-                line += f"\n      `{h.last_crash_error[:100]}`"
-            agent_lines.append(line)
-        agent_block = "\n".join(agent_lines)
-
-    log_path = orch.paths.logs_dir / "agent.log"
-    log_tail = await _read_log_tail(log_path)
-    if log_tail:
-        log_block = f"Recent logs (last 50 lines):\n```\n{log_tail}\n```"
-    else:
-        log_block = "No log file found."
+    log_tail = await _read_log_tail(_resolve_log_path(orch))
+    log_block = (
+        f"Recent logs (last 50 lines):\n```\n{log_tail}\n```" if log_tail else "No log file found."
+    )
 
     return OrchestratorResult(
-        text=fmt("**System Diagnostics**", SEP, info_block, cache_block, agent_block, SEP, log_block),
+        text=fmt(
+            "**System Diagnostics**", SEP, info_block, cache_block, agent_block, SEP, log_block
+        ),
     )
 
 
 # -- Helpers ------------------------------------------------------------------
+
+
+def _build_agent_health_block(orch: Orchestrator) -> str:
+    """Build the multi-agent health section for /status (main agent only)."""
+    supervisor = orch._supervisor
+    if supervisor is None or len(supervisor.health) <= 1:
+        return ""
+
+    status_icon = {
+        "running": "●",
+        "starting": "◐",
+        "crashed": "✖",
+        "stopped": "○",
+    }
+    agent_lines = ["Agents:"]
+    for name in sorted(supervisor.health.keys()):
+        if name == "main":
+            continue
+        h = supervisor.health[name]
+        icon = status_icon.get(h.status, "?")
+        line = f"  {icon} {name} — {h.status}"
+        if h.status == "running" and h.uptime_human:
+            line += f" ({h.uptime_human})"
+        if h.restart_count > 0:
+            line += f" ⟳{h.restart_count}"
+        if h.status == "crashed" and h.last_crash_error:
+            line += f"\n      {h.last_crash_error[:80]}"
+        agent_lines.append(line)
+    return "\n".join(agent_lines)
 
 
 async def _build_status(orch: Orchestrator, chat_id: int) -> str:
@@ -271,31 +314,7 @@ async def _build_status(orch: Orchestrator, chat_id: int) -> str:
         auth_lines.append(f"  [{provider}] {result.status.value}{age_label}")
     auth_block = "Auth:\n" + "\n".join(auth_lines)
 
-    # Multi-agent health (main agent only)
-    agent_block = ""
-    supervisor = getattr(orch, "_supervisor", None)
-    if supervisor is not None and len(supervisor.health) > 1:
-        _STATUS_ICON = {
-            "running": "●",
-            "starting": "◐",
-            "crashed": "✖",
-            "stopped": "○",
-        }
-        agent_lines = ["Agents:"]
-        for name in sorted(supervisor.health.keys()):
-            if name == "main":
-                continue
-            h = supervisor.health[name]
-            icon = _STATUS_ICON.get(h.status, "?")
-            line = f"  {icon} {name} — {h.status}"
-            if h.status == "running" and h.uptime_human:
-                line += f" ({h.uptime_human})"
-            if h.restart_count > 0:
-                line += f" ⟳{h.restart_count}"
-            if h.status == "crashed" and h.last_crash_error:
-                line += f"\n      {h.last_crash_error[:80]}"
-            agent_lines.append(line)
-        agent_block = "\n".join(agent_lines)
+    agent_block = _build_agent_health_block(orch)
 
     blocks = ["**Status**", SEP, session_block]
     if bg_block:

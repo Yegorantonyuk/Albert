@@ -7,7 +7,7 @@ import contextlib
 import html as html_mod
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
@@ -18,7 +18,6 @@ from aiogram.types import BotCommand, FSInputFile, ReplyParameters
 
 from ductor_bot.background import BackgroundResult
 from ductor_bot.bot.buttons import extract_buttons_for_session
-from ductor_bot.multiagent.bus import AsyncInterAgentResult
 from ductor_bot.bot.file_browser import (
     file_browser_start,
     handle_file_browser_callback,
@@ -39,8 +38,8 @@ from ductor_bot.bot.message_dispatch import (
     run_streaming_message,
 )
 from ductor_bot.bot.middleware import MQ_PREFIX, AuthMiddleware, SequentialMiddleware
+from ductor_bot.bot.sender import SendRichOpts, send_rich
 from ductor_bot.bot.sender import send_files_from_text as _send_files_from_text
-from ductor_bot.bot.sender import send_rich
 from ductor_bot.bot.topic import get_thread_id
 from ductor_bot.bot.typing import TypingContext as _TypingContext
 from ductor_bot.bot.welcome import (
@@ -50,7 +49,8 @@ from ductor_bot.bot.welcome import (
     is_welcome_callback,
     resolve_welcome_callback,
 )
-from ductor_bot.commands import BOT_COMMANDS as _COMMAND_DEFS, MULTIAGENT_COMMANDS as _MA_DEFS
+from ductor_bot.commands import BOT_COMMANDS as _COMMAND_DEFS
+from ductor_bot.commands import MULTIAGENT_SUB_COMMANDS as _MA_SUB_DEFS
 from ductor_bot.config import AgentConfig
 from ductor_bot.files.allowed_roots import resolve_allowed_roots
 from ductor_bot.infra.restart import EXIT_RESTART, consume_restart_marker, consume_restart_sentinel
@@ -62,6 +62,7 @@ from ductor_bot.infra.updater import (
 )
 from ductor_bot.infra.version import VersionInfo, get_current_version
 from ductor_bot.log_context import set_log_context
+from ductor_bot.multiagent.bus import AsyncInterAgentResult
 from ductor_bot.text.response_format import SEP, fmt
 from ductor_bot.workspace.paths import DuctorPaths
 
@@ -81,9 +82,8 @@ TypingContext = _TypingContext
 send_files_from_text = _send_files_from_text
 
 _BOT_COMMANDS = [BotCommand(command=cmd, description=desc) for cmd, desc in _COMMAND_DEFS]
-_MA_BOT_COMMANDS = [BotCommand(command=cmd, description=desc) for cmd, desc in _MA_DEFS]
 
-_CMD_DESC: dict[str, str] = {**dict(_COMMAND_DEFS), **dict(_MA_DEFS)}
+_CMD_DESC: dict[str, str] = {**dict(_COMMAND_DEFS), **dict(_MA_SUB_DEFS)}
 
 
 def _help_line(command: str) -> str:
@@ -109,16 +109,12 @@ def _sanitize_cron_result_text(result: str) -> str:
 _HELP_TEXT = fmt(
     "**Command Reference**",
     SEP,
-    f"Session\n{_help_line('new')}\n{_help_line('stop')}\n{_help_line('status')}",
-    f"AI\n{_help_line('model')}\n{_help_line('memory')}",
-    f"Automation\n{_help_line('cron')}\n{_help_line('session')}\n{_help_line('sessions')}",
-    "System\n"
-    f"{_help_line('showfiles')}\n"
-    f"{_help_line('info')}\n"
-    f"{_help_line('upgrade')}\n"
-    f"{_help_line('restart')}\n"
-    f"{_help_line('diagnose')}\n"
-    f"{_help_line('help')}",
+    f"Daily\n{_help_line('new')}\n{_help_line('stop')}\n"
+    f"{_help_line('model')}\n{_help_line('status')}\n{_help_line('memory')}",
+    f"Automation\n{_help_line('session')}\n{_help_line('cron')}",
+    f"Multi-Agent\n{_help_line('agent_commands')}",
+    f"Browse & Info\n{_help_line('showfiles')}\n{_help_line('info')}\n{_help_line('help')}",
+    f"Maintenance\n{_help_line('diagnose')}\n{_help_line('upgrade')}\n{_help_line('restart')}",
     SEP,
     "Send any message to start working with your agent.",
 )
@@ -175,20 +171,36 @@ class TelegramBot:
             raise RuntimeError(msg)
         return self._orchestrator
 
+    @property
+    def orchestrator(self) -> Orchestrator | None:
+        """Public read-only access to the orchestrator (None before startup)."""
+        return self._orchestrator
+
+    @property
+    def dispatcher(self) -> Dispatcher:
+        """Public read-only access to the aiogram Dispatcher."""
+        return self._dp
+
+    @property
+    def bot_instance(self) -> Bot:
+        """Public read-only access to the aiogram Bot instance."""
+        return self._bot
+
     def _file_roots(self, paths: DuctorPaths) -> list[Path] | None:
         """Allowed root directories for ``<file:...>`` tag sends."""
         return resolve_allowed_roots(self._config.file_access, paths.workspace)
 
-    async def _broadcast(self, text: str, **kwargs: Any) -> None:
+    async def _broadcast(self, text: str, opts: SendRichOpts | None = None) -> None:
         """Send a message to all allowed users."""
         for uid in self._config.allowed_user_ids:
-            await send_rich(self._bot, uid, text, **kwargs)
+            await send_rich(self._bot, uid, text, opts)
 
     async def _on_startup(self) -> None:
         from ductor_bot.orchestrator.core import Orchestrator
 
         self._orchestrator = await Orchestrator.create(
-            self._config, agent_name=self._agent_name,
+            self._config,
+            agent_name=self._agent_name,
         )
 
         me = await self._bot.get_me()
@@ -203,7 +215,12 @@ class TelegramBot:
             msg = str(sentinel.get("message", "Restart completed."))
             if chat_id:
                 await send_rich(
-                    self._bot, chat_id, msg, allowed_roots=self._file_roots(self._orch.paths)
+                    self._bot,
+                    chat_id,
+                    msg,
+                    SendRichOpts(
+                        allowed_roots=self._file_roots(self._orch.paths),
+                    ),
                 )
 
         self._orchestrator.set_cron_result_handler(self._on_cron_result)
@@ -223,7 +240,9 @@ class TelegramBot:
                     self._bot,
                     uid,
                     f"**Upgrade complete** `{old_v}` -> `{new_v}`",
-                    allowed_roots=self._file_roots(self._orch.paths),
+                    SendRichOpts(
+                        allowed_roots=self._file_roots(self._orch.paths),
+                    ),
                 )
 
         # Start background version checker (skip for dev/source installs)
@@ -247,6 +266,7 @@ class TelegramBot:
         r.message(Command("session"))(self._on_session)
         r.message(Command("sessions"))(self._on_sessions)
         r.message(Command("showfiles"))(self._on_showfiles)
+        r.message(Command("agent_commands"))(self._on_agent_commands)
         base_cmds = ["status", "memory", "model", "cron", "diagnose", "upgrade"]
         if self._agent_name == "main":
             base_cmds += ["agents", "agent_start", "agent_stop", "agent_restart"]
@@ -277,9 +297,11 @@ class TelegramBot:
                 self._bot,
                 chat_id,
                 text,
-                reply_to=message,
-                reply_markup=keyboard,
-                thread_id=thread_id,
+                SendRichOpts(
+                    reply_to_message_id=message.message_id,
+                    reply_markup=keyboard,
+                    thread_id=thread_id,
+                ),
             )
 
     async def _send_welcome_image(
@@ -337,8 +359,36 @@ class TelegramBot:
             self._bot,
             message.chat.id,
             _HELP_TEXT,
-            reply_to=message,
-            thread_id=get_thread_id(message),
+            SendRichOpts(reply_to_message_id=message.message_id, thread_id=get_thread_id(message)),
+        )
+
+    async def _on_agent_commands(self, message: Message) -> None:
+        """Handle /agent_commands: explain multi-agent system + list commands."""
+        chat_id = message.chat.id
+        thread_id = get_thread_id(message)
+
+        lines = [
+            "The multi-agent system lets you run additional bots as "
+            "sub-agents — each with its own Telegram token, workspace, "
+            "and user list. All agents share a single process and can "
+            "communicate via the inter-agent bus.",
+            "",
+            "**Commands**",
+            "`/agents` — list all agents and their status",
+            "`/agent_start <name>` — start a sub-agent",
+            "`/agent_stop <name>` — stop a sub-agent",
+            "`/agent_restart <name>` — restart a sub-agent",
+            "",
+            "**Setup**",
+            "Ask your agent to create a new sub-agent or edit "
+            "`agents.json` in your ductor home directory.",
+        ]
+        text = fmt("**Multi-Agent System**", SEP, "\n".join(lines))
+        await send_rich(
+            self._bot,
+            chat_id,
+            text,
+            SendRichOpts(reply_to_message_id=message.message_id, thread_id=thread_id),
         )
 
     async def _on_info(self, message: Message) -> None:
@@ -371,9 +421,11 @@ class TelegramBot:
             self._bot,
             message.chat.id,
             text,
-            reply_to=message,
-            reply_markup=keyboard,
-            thread_id=get_thread_id(message),
+            SendRichOpts(
+                reply_to_message_id=message.message_id,
+                reply_markup=keyboard,
+                thread_id=get_thread_id(message),
+            ),
         )
 
     async def _on_showfiles(self, message: Message) -> None:
@@ -383,9 +435,11 @@ class TelegramBot:
             self._bot,
             message.chat.id,
             text,
-            reply_to=message,
-            reply_markup=keyboard,
-            thread_id=get_thread_id(message),
+            SendRichOpts(
+                reply_to_message_id=message.message_id,
+                reply_markup=keyboard,
+                thread_id=get_thread_id(message),
+            ),
         )
 
     # -- Abort, commands, sessions ---------------------------------------------
@@ -425,8 +479,9 @@ class TelegramBot:
                     self._bot,
                     chat_id,
                     "**Agent is working.** Use /stop to terminate first, then switch models.",
-                    reply_to=message,
-                    thread_id=get_thread_id(message),
+                    SendRichOpts(
+                        reply_to_message_id=message.message_id, thread_id=get_thread_id(message)
+                    ),
                 )
                 return True
             async with self._sequential.get_lock(chat_id):
@@ -451,9 +506,15 @@ class TelegramBot:
         await handle_new_session(self._orch, self._bot, message)
 
     def _build_session_help(self) -> str:
-        """Build auth-aware /session usage text."""
+        """Build the /session hub: explain the system + show commands."""
         providers = self._orch._available_providers
-        lines: list[str] = []
+        lines: list[str] = [
+            "Background sessions run tasks in parallel without blocking "
+            "the main chat. Each session gets a unique name and runs "
+            "independently — you can have multiple sessions active at once.",
+            "",
+            "**Usage**",
+        ]
 
         if len(providers) == 1:
             p = next(iter(providers))
@@ -475,11 +536,17 @@ class TelegramBot:
                 lines.append("`/session @flash <prompt>` — Gemini (flash)")
             lines.append("`/session @provider model <prompt>` — explicit")
 
-        lines.append("")
-        lines.append("Follow up: `@session-name <message>`")
-        lines.append("Manage: `/sessions`  Cancel: `/stop`")
+        lines += [
+            "",
+            "**Follow up**",
+            "`@session-name <message>` — send a follow-up to a running session",
+            "",
+            "**Commands**",
+            "`/sessions` — view and manage all background sessions",
+            "`/stop` — cancel the running session",
+        ]
 
-        return fmt("**Background Session**", SEP, "\n".join(lines))
+        return fmt("**Background Sessions**", SEP, "\n".join(lines))
 
     async def _on_session(self, message: Message) -> None:
         """Handle /session: submit a named background session."""
@@ -495,8 +562,7 @@ class TelegramBot:
                 self._bot,
                 chat_id,
                 self._build_session_help(),
-                reply_to=message,
-                thread_id=thread_id,
+                SendRichOpts(reply_to_message_id=message.message_id, thread_id=thread_id),
             )
             return
 
@@ -543,17 +609,21 @@ class TelegramBot:
                         SEP,
                         f"Task `{task_id}` queued.",
                     ),
-                    reply_to=message,
-                    thread_id=thread_id,
+                    SendRichOpts(reply_to_message_id=message.message_id, thread_id=thread_id),
                 )
             else:
-                task_id, session_name = self._orch.submit_named_session(
-                    chat_id,
-                    prompt,
+                from ductor_bot.orchestrator.core import NamedSessionRequest
+
+                ns_request = NamedSessionRequest(
                     message_id=message.message_id,
                     thread_id=thread_id,
                     provider_override=provider_override,
                     model_override=model_override,
+                )
+                task_id, session_name = self._orch.submit_named_session(
+                    chat_id,
+                    prompt,
+                    ns_request,
                 )
                 ns = self._orch.get_named_session(chat_id, session_name)
                 provider = ns.provider if ns else (provider_override or self._orch._config.provider)
@@ -571,11 +641,15 @@ class TelegramBot:
                         f"Running on {provider_label}{model_info}.\n"
                         f"Follow up: `@{session_name} <message>`",
                     ),
-                    reply_to=message,
-                    thread_id=thread_id,
+                    SendRichOpts(reply_to_message_id=message.message_id, thread_id=thread_id),
                 )
         except ValueError as exc:
-            await send_rich(self._bot, chat_id, str(exc), reply_to=message, thread_id=thread_id)
+            await send_rich(
+                self._bot,
+                chat_id,
+                str(exc),
+                SendRichOpts(reply_to_message_id=message.message_id, thread_id=thread_id),
+            )
 
     async def _on_sessions(self, message: Message) -> None:
         """Handle /sessions: show session management UI."""
@@ -595,8 +669,7 @@ class TelegramBot:
             self._bot,
             message.chat.id,
             text,
-            reply_to=message,
-            thread_id=get_thread_id(message),
+            SendRichOpts(reply_to_message_id=message.message_id, thread_id=get_thread_id(message)),
         )
         self._exit_code = EXIT_RESTART
         await self._dp.stop_polling()
@@ -788,7 +861,10 @@ class TelegramBot:
         if result.text:
             roots = self._file_roots(self._orch.paths)
             await send_rich(
-                self._bot, chat_id, result.text, allowed_roots=roots, thread_id=thread_id
+                self._bot,
+                chat_id,
+                result.text,
+                SendRichOpts(allowed_roots=roots, thread_id=thread_id),
             )
 
     async def _handle_non_streaming_ns(
@@ -806,7 +882,10 @@ class TelegramBot:
         if result.text:
             roots = self._file_roots(self._orch.paths)
             await send_rich(
-                self._bot, chat_id, result.text, allowed_roots=roots, thread_id=thread_id
+                self._bot,
+                chat_id,
+                result.text,
+                SendRichOpts(allowed_roots=roots, thread_id=thread_id),
             )
 
     async def _handle_file_browser(
@@ -996,10 +1075,12 @@ class TelegramBot:
             self._bot,
             result.chat_id,
             cleaned,
-            reply_to_message_id=result.message_id,
-            reply_markup=markup,
-            allowed_roots=roots,
-            thread_id=result.thread_id,
+            SendRichOpts(
+                reply_to_message_id=result.message_id,
+                reply_markup=markup,
+                allowed_roots=roots,
+                thread_id=result.thread_id,
+            ),
         )
 
     async def _deliver_stateless_result(self, result: BackgroundResult, elapsed: str) -> None:
@@ -1030,9 +1111,11 @@ class TelegramBot:
             self._bot,
             result.chat_id,
             text,
-            reply_to_message_id=result.message_id,
-            allowed_roots=roots,
-            thread_id=result.thread_id,
+            SendRichOpts(
+                reply_to_message_id=result.message_id,
+                allowed_roots=roots,
+                thread_id=result.thread_id,
+            ),
         )
 
     async def _on_cron_result(self, title: str, result: str, status: str) -> None:
@@ -1048,15 +1131,17 @@ class TelegramBot:
             if clean_result
             else f"**TASK: {title}**\n\n_{status}_"
         )
-        await self._broadcast(text, allowed_roots=self._file_roots(self._orch.paths))
+        await self._broadcast(text, SendRichOpts(allowed_roots=self._file_roots(self._orch.paths)))
 
     async def _on_heartbeat_result(self, chat_id: int, text: str) -> None:
         """Send heartbeat alert to the user."""
         logger.debug("Heartbeat delivery chars=%d", len(text))
-        await send_rich(self._bot, chat_id, text, allowed_roots=self._file_roots(self._orch.paths))
+        await send_rich(
+            self._bot, chat_id, text, SendRichOpts(allowed_roots=self._file_roots(self._orch.paths))
+        )
         logger.info("Heartbeat delivered")
 
-    async def _on_async_interagent_result(
+    async def on_async_interagent_result(
         self,
         result: AsyncInterAgentResult,
     ) -> None:
@@ -1081,7 +1166,7 @@ class TelegramBot:
                 f"Error: {result.error}\n"
                 f"Request: _{result.message_preview}_"
             )
-            await send_rich(self._bot, chat_id, error_text, allowed_roots=roots)
+            await send_rich(self._bot, chat_id, error_text, SendRichOpts(allowed_roots=roots))
             return
 
         # Run the orchestrator turn WITHOUT the chat lock so user messages
@@ -1094,7 +1179,7 @@ class TelegramBot:
         )
 
         if response_text:
-            await send_rich(self._bot, chat_id, response_text, allowed_roots=roots)
+            await send_rich(self._bot, chat_id, response_text, SendRichOpts(allowed_roots=roots))
 
     async def _handle_webhook_wake(self, chat_id: int, prompt: str) -> str | None:
         """Process webhook wake prompt through the normal message pipeline.
@@ -1108,7 +1193,7 @@ class TelegramBot:
         async with lock:
             result = await self._orch.handle_message(chat_id, prompt)
         roots = self._file_roots(self._orch.paths)
-        await send_rich(self._bot, chat_id, result.text, allowed_roots=roots)
+        await send_rich(self._bot, chat_id, result.text, SendRichOpts(allowed_roots=roots))
         return result.text
 
     async def _on_webhook_result(self, result: object) -> None:
@@ -1126,7 +1211,7 @@ class TelegramBot:
             text = f"**WEBHOOK (CRON TASK): {result.hook_title}**\n\n{result.result_text}"
         else:
             text = f"**WEBHOOK (CRON TASK): {result.hook_title}**\n\n_{result.status}_"
-        await self._broadcast(text, allowed_roots=self._file_roots(self._orch.paths))
+        await self._broadcast(text, SendRichOpts(allowed_roots=self._file_roots(self._orch.paths)))
 
     # -- Update notifications --------------------------------------------------
 
@@ -1156,7 +1241,7 @@ class TelegramBot:
             SEP,
             f"Installed: `{info.current}`\nNew:       `{info.latest}`",
         )
-        await self._broadcast(text, reply_markup=keyboard)
+        await self._broadcast(text, SendRichOpts(reply_markup=keyboard))
 
     async def _handle_upgrade_callback(
         self, chat_id: int, message_id: int, data: str, *, thread_id: int | None = None
@@ -1275,16 +1360,32 @@ class TelegramBot:
             self._bot,
             chat_id,
             f"**Changelog v{version}**\n\n{body}",
-            allowed_roots=roots,
-            thread_id=thread_id,
+            SendRichOpts(allowed_roots=roots, thread_id=thread_id),
         )
 
     async def _sync_commands(self) -> None:
-        desired = _BOT_COMMANDS + _MA_BOT_COMMANDS if self._agent_name == "main" else _BOT_COMMANDS
+        from aiogram.types import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+
+        desired = _BOT_COMMANDS
+
+        # Clear legacy scoped commands (previous versions set per-scope lists).
+        # Telegram keeps scoped commands independently — they must be deleted
+        # explicitly or they shadow the default-scope list.
+        for scope in (BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()):
+            try:
+                scoped = await self._bot.get_my_commands(scope=scope)
+                if scoped:
+                    await self._bot.delete_my_commands(scope=scope)
+                    logger.info("Cleared legacy %s commands", type(scope).__name__)
+            except TelegramAPIError:
+                pass  # scope not set — nothing to clear
+
+        # Set default-scope commands (shown everywhere).
+        # Compare as ordered list so reordering triggers an update.
         current = await self._bot.get_my_commands()
-        current_set = {(c.command, c.description) for c in current}
-        desired_set = {(c.command, c.description) for c in desired}
-        if current_set != desired_set:
+        current_tuples = [(c.command, c.description) for c in current]
+        desired_tuples = [(c.command, c.description) for c in desired]
+        if current_tuples != desired_tuples:
             await self._bot.set_my_commands(desired)
             logger.info("Updated %d bot commands", len(desired))
 
@@ -1306,12 +1407,21 @@ class TelegramBot:
         """Start polling. Returns exit code (0 = normal, 42 = restart)."""
         logger.info("Starting Telegram bot (aiogram, long-polling)...")
         await self._bot.delete_webhook(drop_pending_updates=True)
+        # Flush any lingering polling session from a previous instance (e.g.
+        # after /agent_restart).  offset=-1 confirms all pending updates and
+        # immediately takes over the polling slot on Telegram's servers,
+        # preventing TelegramConflictError on the first real getUpdates call.
+        with contextlib.suppress(Exception):
+            from aiogram.methods import GetUpdates
+
+            await self._bot(GetUpdates(offset=-1, timeout=0))
         allowed_updates = self._dp.resolve_used_update_types()
         logger.info("Polling allowed_updates=%s", ",".join(allowed_updates))
         await self._dp.start_polling(
             self._bot,
             allowed_updates=allowed_updates,
             close_bot_session=True,
+            handle_signals=False,
         )
         return self._exit_code
 
@@ -1321,4 +1431,15 @@ class TelegramBot:
             await self._update_observer.stop()
         if self._orchestrator:
             await self._orchestrator.shutdown()
+
+        # Release the Telegram polling session so a new bot instance can start.
+        # Without this, Telegram rejects the next getUpdates call with
+        # TelegramConflictError ("terminated by other getUpdates request").
+        with contextlib.suppress(Exception):
+            await self._dp.stop_polling()
+        with contextlib.suppress(Exception):
+            await self._bot.delete_webhook(drop_pending_updates=False)
+        with contextlib.suppress(Exception):
+            await self._bot.session.close()
+
         logger.info("Telegram bot shut down")

@@ -7,6 +7,7 @@ import time
 from unittest.mock import patch
 
 from ductor_bot.webhook.auth import (
+    HmacConfig,
     RateLimiter,
     validate_bearer_token,
     validate_hmac_signature,
@@ -106,7 +107,7 @@ class TestValidateHmacSignature:
         body = b'{"event": "push"}'
         secret = "my-secret"
         sig = _sign(body, secret)
-        assert validate_hmac_signature(body, sig, secret, sig_prefix="") is True
+        assert validate_hmac_signature(body, sig, secret, cfg=HmacConfig(sig_prefix="")) is True
 
     def test_valid_signature_with_sha256_prefix(self) -> None:
         body = b'{"event": "push"}'
@@ -116,7 +117,10 @@ class TestValidateHmacSignature:
 
     def test_invalid_signature(self) -> None:
         body = b'{"event": "push"}'
-        assert validate_hmac_signature(body, "deadbeef", "my-secret", sig_prefix="") is False
+        assert (
+            validate_hmac_signature(body, "deadbeef", "my-secret", cfg=HmacConfig(sig_prefix=""))
+            is False
+        )
 
     def test_empty_signature_value(self) -> None:
         assert validate_hmac_signature(b"body", "", "secret") is False
@@ -129,7 +133,9 @@ class TestValidateHmacSignature:
         original = b'{"amount": 100}'
         sig = _sign(original, secret)
         tampered = b'{"amount": 999}'
-        assert validate_hmac_signature(tampered, sig, secret, sig_prefix="") is False
+        assert (
+            validate_hmac_signature(tampered, sig, secret, cfg=HmacConfig(sig_prefix="")) is False
+        )
 
     # -- Configurable algorithm --
 
@@ -137,22 +143,22 @@ class TestValidateHmacSignature:
         body = b'{"event": "payment"}'
         secret = "twilio-secret"
         sig = _sign(body, secret, "sha1")
-        assert validate_hmac_signature(body, sig, secret, algorithm="sha1", sig_prefix="") is True
+        cfg = HmacConfig(algorithm="sha1", sig_prefix="")
+        assert validate_hmac_signature(body, sig, secret, cfg=cfg) is True
 
     def test_sha512_algorithm(self) -> None:
         body = b'{"data": 1}'
         secret = "strong"
         sig = _sign(body, secret, "sha512")
-        assert validate_hmac_signature(body, sig, secret, algorithm="sha512", sig_prefix="") is True
+        cfg = HmacConfig(algorithm="sha512", sig_prefix="")
+        assert validate_hmac_signature(body, sig, secret, cfg=cfg) is True
 
     def test_unknown_algorithm_falls_back_to_sha256(self) -> None:
         body = b'{"x": 1}'
         secret = "s"
         sig = _sign(body, secret, "sha256")
-        assert (
-            validate_hmac_signature(body, sig, secret, algorithm="unknown-algo", sig_prefix="")
-            is True
-        )
+        cfg = HmacConfig(algorithm="unknown-algo", sig_prefix="")
+        assert validate_hmac_signature(body, sig, secret, cfg=cfg) is True
 
     # -- Configurable encoding --
 
@@ -160,13 +166,12 @@ class TestValidateHmacSignature:
         body = b'{"event": "order"}'
         secret = "shopify-secret"
         sig = _sign_b64(body, secret)
-        assert validate_hmac_signature(body, sig, secret, encoding="base64", sig_prefix="") is True
+        cfg = HmacConfig(encoding="base64", sig_prefix="")
+        assert validate_hmac_signature(body, sig, secret, cfg=cfg) is True
 
     def test_base64_encoding_wrong_sig_fails(self) -> None:
-        assert (
-            validate_hmac_signature(b"body", "dGVzdA==", "secret", encoding="base64", sig_prefix="")
-            is False
-        )
+        cfg = HmacConfig(encoding="base64", sig_prefix="")
+        assert validate_hmac_signature(b"body", "dGVzdA==", "secret", cfg=cfg) is False
 
     # -- sig_regex extraction --
 
@@ -179,22 +184,12 @@ class TestValidateHmacSignature:
         signed_payload = f"{timestamp}.".encode() + body
         sig = _sign(signed_payload, secret)
         header = f"t={timestamp},v1={sig}"
-        assert (
-            validate_hmac_signature(
-                body,
-                header,
-                secret,
-                sig_regex=r"v1=([a-f0-9]+)",
-                payload_prefix_regex=r"t=(\d+)",
-            )
-            is True
-        )
+        cfg = HmacConfig(sig_regex=r"v1=([a-f0-9]+)", payload_prefix_regex=r"t=(\d+)")
+        assert validate_hmac_signature(body, header, secret, cfg=cfg) is True
 
     def test_sig_regex_no_match_fails(self) -> None:
-        assert (
-            validate_hmac_signature(b"body", "no-match-here", "secret", sig_regex=r"v1=([a-f0-9]+)")
-            is False
-        )
+        cfg = HmacConfig(sig_regex=r"v1=([a-f0-9]+)")
+        assert validate_hmac_signature(b"body", "no-match-here", "secret", cfg=cfg) is False
 
     def test_sig_regex_overrides_sig_prefix(self) -> None:
         """When sig_regex is set, sig_prefix is ignored."""
@@ -203,12 +198,8 @@ class TestValidateHmacSignature:
         sig = _sign(body, secret)
         header = f"custom={sig}"
         # sig_prefix would mismatch, but sig_regex extracts correctly
-        assert (
-            validate_hmac_signature(
-                body, header, secret, sig_prefix="wrong-prefix=", sig_regex=r"custom=([a-f0-9]+)"
-            )
-            is True
-        )
+        cfg = HmacConfig(sig_prefix="wrong-prefix=", sig_regex=r"custom=([a-f0-9]+)")
+        assert validate_hmac_signature(body, header, secret, cfg=cfg) is True
 
     # -- payload_prefix_regex --
 
@@ -220,16 +211,8 @@ class TestValidateHmacSignature:
         signed_payload = f"{timestamp}.".encode() + body
         sig = _sign(signed_payload, secret)
         header_val = f"v0={timestamp}:{sig}"
-        assert (
-            validate_hmac_signature(
-                body,
-                header_val,
-                secret,
-                sig_regex=r":([a-f0-9]+)$",
-                payload_prefix_regex=r"v0=(\d+):",
-            )
-            is True
-        )
+        cfg = HmacConfig(sig_regex=r":([a-f0-9]+)$", payload_prefix_regex=r"v0=(\d+):")
+        assert validate_hmac_signature(body, header_val, secret, cfg=cfg) is True
 
     # -- Combined: Shopify-style (base64, no prefix, SHA-256) --
 
@@ -237,7 +220,8 @@ class TestValidateHmacSignature:
         body = b'{"order_id": 123}'
         secret = "shopify-whsec"
         sig = _sign_b64(body, secret)
-        assert validate_hmac_signature(body, sig, secret, encoding="base64", sig_prefix="") is True
+        cfg = HmacConfig(encoding="base64", sig_prefix="")
+        assert validate_hmac_signature(body, sig, secret, cfg=cfg) is True
 
 
 # ---------------------------------------------------------------------------

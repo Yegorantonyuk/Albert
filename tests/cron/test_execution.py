@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from ductor_bot.cli.param_resolver import TaskExecutionConfig
 from ductor_bot.cron.execution import (
+    OneShotCommand,
     build_cmd,
     enrich_instruction,
     execute_one_shot,
@@ -156,12 +157,11 @@ class TestExecuteOneShotStdin:
             mock_exec.return_value = proc
 
             result = await execute_one_shot(
-                ["/usr/bin/gemini", "-p", ""],
+                OneShotCommand(cmd=["/usr/bin/gemini", "-p", ""], stdin_input=b"hello"),
                 cwd=Path("/tmp"),
                 provider="gemini",
                 timeout_seconds=60,
                 timeout_label="Test",
-                stdin_input=b"hello",
             )
 
         call_kwargs = mock_exec.call_args[1]
@@ -178,7 +178,7 @@ class TestExecuteOneShotStdin:
             mock_exec.return_value = proc
 
             await execute_one_shot(
-                ["/usr/bin/claude", "-p", "--", "hello"],
+                OneShotCommand(cmd=["/usr/bin/claude", "-p", "--", "hello"]),
                 cwd=Path("/tmp"),
                 provider="claude",
                 timeout_seconds=60,

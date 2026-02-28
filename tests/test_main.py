@@ -432,18 +432,17 @@ class TestUpgradeCli:
 class TestReExecBot:
     """Test cross-platform re-exec helper."""
 
-    def test_re_exec_uses_execv_on_posix(self) -> None:
+    def test_re_exec_uses_popen_on_posix(self) -> None:
         from ductor_bot.__main__ import _re_exec_bot
 
         with (
-            patch("ductor_bot.__main__._IS_WINDOWS", False),
-            patch("ductor_bot.__main__.os.execv") as mock_execv,
+            patch("ductor_bot.__main__.subprocess.Popen") as mock_popen,
+            pytest.raises(SystemExit) as exc_info,
         ):
-            mock_execv.side_effect = SystemExit(0)
-            with pytest.raises(SystemExit):
-                _re_exec_bot()
+            _re_exec_bot()
 
-        mock_execv.assert_called_once_with(sys.executable, [sys.executable, "-m", "ductor_bot"])
+        mock_popen.assert_called_once_with([sys.executable, "-m", "ductor_bot"])
+        assert exc_info.value.code == 0
 
     def test_re_exec_uses_same_args_on_windows_flag(self) -> None:
         from ductor_bot.__main__ import _re_exec_bot

@@ -6,7 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ductor_bot.cli.gemini_cache import GeminiModelCache
-from ductor_bot.cli.model_cache import REFRESH_INTERVAL_S as REFRESH_INTERVAL_S  # noqa: PLC0414
 from ductor_bot.cli.model_cache import BaseModelCacheObserver
 
 

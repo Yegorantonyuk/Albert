@@ -75,3 +75,38 @@ class AgentRegistry:
         if removed:
             self.save(remaining)
         return removed
+
+
+def update_agent_fields(agents_path: Path, agent_name: str, **fields: object) -> None:
+    """Update specific fields of an agent entry in agents.json.
+
+    Reads the raw JSON, patches the matching entry, and writes back.
+    A value of ``None`` removes the key from the entry.
+    No-op if the file is missing or the agent is not found.
+    """
+    if not agents_path.is_file():
+        return
+    try:
+        raw = json.loads(agents_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Cannot read agents.json for update: %s", agents_path)
+        return
+    if not isinstance(raw, list):
+        return
+
+    for entry in raw:
+        if entry.get("name") == agent_name:
+            for key, value in fields.items():
+                if value is None:
+                    entry.pop(key, None)
+                else:
+                    entry[key] = value
+            break
+    else:
+        return
+
+    agents_path.write_text(
+        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    logger.info("Updated agent '%s' in agents.json: %s", agent_name, list(fields))

@@ -9,6 +9,7 @@ import pytest
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.flows import (
+    StreamingCallbacks,
     _finish_normal,
     _strip_ack_token,
     _update_session,
@@ -268,7 +269,9 @@ async def test_streaming_delegates_correctly(orch: Orchestrator) -> None:
     object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
     on_delta = AsyncMock()
 
-    result = await normal_streaming(orch, 1, "Hello", on_text_delta=on_delta)
+    result = await normal_streaming(
+        orch, 1, "Hello", cbs=StreamingCallbacks(on_text_delta=on_delta)
+    )
     assert result.text == "Hello from agent"
     mock_streaming.assert_called_once()
 

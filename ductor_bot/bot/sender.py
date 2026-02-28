@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import html as html_mod
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +23,17 @@ from ductor_bot.security.paths import is_path_safe
 if TYPE_CHECKING:
     from aiogram import Bot
     from aiogram.types import Message
+
+
+@dataclass(slots=True)
+class SendRichOpts:
+    """Optional parameters for :func:`send_rich`."""
+
+    reply_to_message_id: int | None = None
+    allowed_roots: Sequence[Path] | None = field(default=None)
+    reply_markup: InlineKeyboardMarkup | None = None
+    thread_id: int | None = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -162,38 +175,32 @@ async def _send_text_chunks(
     return last_msg
 
 
-async def send_rich(  # noqa: PLR0913
+async def send_rich(
     bot: Bot,
     chat_id: int,
     text: str,
-    *,
-    reply_to: Message | None = None,
-    reply_to_message_id: int | None = None,
-    allowed_roots: Sequence[Path] | None = None,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    thread_id: int | None = None,
+    opts: SendRichOpts | None = None,
 ) -> None:
     """Parse <file:/path> tags, send text first, then files.
 
-    When *reply_markup* is provided it is used directly; otherwise buttons
+    When *opts.reply_markup* is provided it is used directly; otherwise buttons
     are extracted from ``[button:...]`` markers in the text.
     """
+    o = opts or SendRichOpts()
     file_paths = FILE_PATH_RE.findall(text)
     clean_text = FILE_PATH_RE.sub("", text).strip()
     logger.debug("Sending rich text chars=%d files=%d", len(clean_text), len(file_paths))
 
-    button_markup = reply_markup if reply_markup is not None else extract_buttons(clean_text)[1]
+    button_markup = o.reply_markup if o.reply_markup is not None else extract_buttons(clean_text)[1]
     last_msg: Message | None = None
-
-    effective_reply_id = reply_to.message_id if reply_to else reply_to_message_id
 
     if clean_text:
         last_msg = await _send_text_chunks(
             bot,
             chat_id,
             clean_text,
-            reply_to_message_id=effective_reply_id,
-            thread_id=thread_id,
+            reply_to_message_id=o.reply_to_message_id,
+            thread_id=o.thread_id,
         )
 
     if button_markup is not None and last_msg is not None:
@@ -213,8 +220,8 @@ async def send_rich(  # noqa: PLR0913
             bot,
             chat_id,
             path_from_file_tag(fp),
-            allowed_roots=allowed_roots,
-            thread_id=thread_id,
+            allowed_roots=o.allowed_roots,
+            thread_id=o.thread_id,
         )
 
 
@@ -242,7 +249,7 @@ async def send_file(
         )
         return
 
-    if not path.exists():  # noqa: ASYNC240
+    if not await asyncio.to_thread(path.exists):
         logger.warning("File not found, skipping: %s", path)
         await bot.send_message(
             chat_id=chat_id,

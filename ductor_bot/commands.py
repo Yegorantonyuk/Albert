@@ -1,26 +1,38 @@
-"""Bot command definitions shared across layers."""
+"""Bot command definitions shared across layers.
+
+Commands are ordered by usage frequency (most used first).
+Descriptions are kept ≤22 chars so mobile clients don't truncate.
+"""
 
 from __future__ import annotations
 
+# -- Core commands (every agent, shown in Telegram popup) ------------------
+# Sorted by typical usage: daily actions → power-user → rare maintenance.
+
 BOT_COMMANDS: list[tuple[str, str]] = [
-    ("new", "Reset active provider session"),
-    ("stop", "Stop the running agent"),
-    ("status", "Show session info"),
+    # Daily
+    ("new", "Start new chat"),
+    ("stop", "Stop running agent"),
     ("model", "Show/switch model"),
+    ("status", "Session info"),
     ("memory", "Show main memory"),
-    ("cron", "View/manage scheduled cron jobs"),
+    # Automation & multi-agent
+    ("session", "Background sessions"),
+    ("cron", "Manage cron jobs"),
+    ("agent_commands", "Multi-agent system"),
+    # Browse & info
+    ("showfiles", "Browse files"),
     ("info", "Docs, links & about"),
+    ("help", "Show all commands"),
+    # Maintenance (rare)
+    ("diagnose", "System diagnostics"),
     ("upgrade", "Check for updates"),
     ("restart", "Restart bot"),
-    ("session", "Run task in named background session"),
-    ("sessions", "View/manage background sessions"),
-    ("showfiles", "Browse ductor files"),
-    ("diagnose", "Show system diagnostics"),
-    ("help", "Show all commands"),
 ]
 
-# Commands only available on the main agent (multi-agent management).
-MULTIAGENT_COMMANDS: list[tuple[str, str]] = [
+# Sub-commands registered as handlers but NOT shown in the Telegram popup.
+# Users discover them via /agent_commands or /help.
+MULTIAGENT_SUB_COMMANDS: list[tuple[str, str]] = [
     ("agents", "List all agents"),
     ("agent_start", "Start a sub-agent"),
     ("agent_stop", "Stop a sub-agent"),

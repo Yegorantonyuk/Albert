@@ -26,7 +26,7 @@ _STATUS_EMOJI = {
 
 async def cmd_agents(orch: Orchestrator, _chat_id: int, _text: str) -> OrchestratorResult:
     """Handle /agents: list all agents with status."""
-    supervisor = getattr(orch, "_supervisor", None)
+    supervisor = orch._supervisor
     if supervisor is None:
         return OrchestratorResult(text="Multi-agent mode is not active.")
 
@@ -40,6 +40,12 @@ async def cmd_agents(orch: Orchestrator, _chat_id: int, _text: str) -> Orchestra
         info = f"  {emoji} **{name}** [{role}] — {health.status}"
         if health.status == "running" and health.uptime_human:
             info += f" ({health.uptime_human})"
+        if stack:
+            model_label = stack.config.model
+            effort = stack.config.reasoning_effort
+            if effort:
+                model_label += f" ({effort})"
+            info += f" | {model_label}"
         if health.restart_count > 0:
             info += f" (restarts: {health.restart_count})"
         if health.status == "crashed" and health.last_crash_error:
@@ -54,7 +60,7 @@ async def cmd_agents(orch: Orchestrator, _chat_id: int, _text: str) -> Orchestra
 
 async def cmd_agent_stop(orch: Orchestrator, _chat_id: int, text: str) -> OrchestratorResult:
     """Handle /agent_stop <name>: stop a sub-agent."""
-    supervisor = getattr(orch, "_supervisor", None)
+    supervisor = orch._supervisor
     if supervisor is None:
         return OrchestratorResult(text="Multi-agent mode is not active.")
 
@@ -75,7 +81,7 @@ async def cmd_agent_stop(orch: Orchestrator, _chat_id: int, text: str) -> Orches
 
 async def cmd_agent_start(orch: Orchestrator, _chat_id: int, text: str) -> OrchestratorResult:
     """Handle /agent_start <name>: start a sub-agent from the registry."""
-    supervisor = getattr(orch, "_supervisor", None)
+    supervisor = orch._supervisor
     if supervisor is None:
         return OrchestratorResult(text="Multi-agent mode is not active.")
 
@@ -90,7 +96,7 @@ async def cmd_agent_start(orch: Orchestrator, _chat_id: int, text: str) -> Orche
 
 async def cmd_agent_restart(orch: Orchestrator, _chat_id: int, text: str) -> OrchestratorResult:
     """Handle /agent_restart <name>: restart a sub-agent."""
-    supervisor = getattr(orch, "_supervisor", None)
+    supervisor = orch._supervisor
     if supervisor is None:
         return OrchestratorResult(text="Multi-agent mode is not active.")
 

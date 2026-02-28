@@ -126,7 +126,8 @@ class TestForumTopicPropagation:
         msg = _make_message(chat_id=42, topic_thread_id=99)
 
         await handle_abort(orchestrator, bot, chat_id=42, message=msg)
-        assert mock_send.call_args.kwargs["thread_id"] == 99
+        opts = mock_send.call_args[0][3]
+        assert opts.thread_id == 99
 
     @patch("ductor_bot.bot.handlers.send_rich", new_callable=AsyncMock)
     async def test_handle_command_passes_thread_id(self, mock_send: AsyncMock) -> None:
@@ -139,7 +140,8 @@ class TestForumTopicPropagation:
         msg = _make_message(text="/status", topic_thread_id=77)
 
         await handle_command(orchestrator, bot, msg)
-        assert mock_send.call_args.kwargs["thread_id"] == 77
+        opts = mock_send.call_args[0][3]
+        assert opts.thread_id == 77
 
     @patch("ductor_bot.bot.handlers.send_rich", new_callable=AsyncMock)
     async def test_handle_new_session_passes_thread_id(self, mock_send: AsyncMock) -> None:
@@ -151,7 +153,8 @@ class TestForumTopicPropagation:
         msg = _make_message(text="/new", topic_thread_id=55)
 
         await handle_new_session(orchestrator, bot, msg)
-        assert mock_send.call_args.kwargs["thread_id"] == 55
+        opts = mock_send.call_args[0][3]
+        assert opts.thread_id == 55
 
     @patch("ductor_bot.bot.handlers.send_rich", new_callable=AsyncMock)
     async def test_handle_abort_none_thread_id_for_normal_msg(self, mock_send: AsyncMock) -> None:
@@ -164,4 +167,5 @@ class TestForumTopicPropagation:
         msg = _make_message(chat_id=1)
 
         await handle_abort(orchestrator, bot, chat_id=1, message=msg)
-        assert mock_send.call_args.kwargs.get("thread_id") is None
+        opts = mock_send.call_args[0][3]
+        assert opts.thread_id is None

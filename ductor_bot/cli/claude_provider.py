@@ -14,7 +14,7 @@ from ductor_bot.cli.base import (
     CLIConfig,
     docker_wrap,
 )
-from ductor_bot.cli.executor import run_oneshot_subprocess, run_streaming_subprocess
+from ductor_bot.cli.executor import SubprocessSpec, run_oneshot_subprocess, run_streaming_subprocess
 from ductor_bot.cli.stream_events import (
     StreamEvent,
     parse_stream_line,
@@ -98,10 +98,7 @@ class ClaudeCodeCLI(BaseCLI):
         _log_cmd(exec_cmd)
         return await run_oneshot_subprocess(
             config=self._config,
-            exec_cmd=exec_cmd,
-            use_cwd=use_cwd,
-            prompt=prompt,
-            timeout_seconds=timeout_seconds,
+            spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds),
             parse_output=_parse_response,
             provider_label="CLI",
         )
@@ -137,10 +134,7 @@ class ClaudeCodeCLI(BaseCLI):
 
         async for event in run_streaming_subprocess(
             config=self._config,
-            exec_cmd=exec_cmd,
-            use_cwd=use_cwd,
-            prompt=prompt,
-            timeout_seconds=timeout_seconds,
+            spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds),
             line_handler=_claude_line_handler,
             provider_label="CLI",
         ):

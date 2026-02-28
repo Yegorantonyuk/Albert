@@ -1,45 +1,57 @@
-# supervisor (`ductor_bot/run.py`)
+# multiagent/supervisor.py
 
-Optional local supervisor for development-style process restarts.
+In-process multi-agent supervisor (`AgentSupervisor`) for main agent + optional sub-agents.
+
+## File
+
+- `ductor_bot/multiagent/supervisor.py`
 
 ## Purpose
 
-`ductor` normally starts `ductor_bot.__main__:main` directly.
+`run_telegram()` always starts `AgentSupervisor`.
 
-`ductor_bot/run.py` is an extra process wrapper that:
+- main agent always runs under supervision
+- sub-agents are loaded from `~/.ductor/agents.json`
+- crash/restart policy is handled per agent task inside one asyncio process
 
-- starts `python -m ductor_bot` as a child process,
-- watches Python file changes (when `watchfiles` is installed),
-- restarts the child on crash or explicit restart exit code.
+## Startup lifecycle
 
-## Child lifecycle
+`AgentSupervisor.start()`:
 
-Supervisor behavior in `supervisor()`:
+1. start `InterAgentBus`
+2. start `InternalAgentAPI` (`127.0.0.1:8799`)
+3. create/start main `AgentStack`
+4. load + start sub-agents from `agents.json`
+5. start `SharedKnowledgeSync` (`SHAREDMEMORY.md` -> agent memories)
+6. start `agents.json` watcher
+7. wait for main agent completion and return its exit code
 
-1. sets `DUCTOR_SUPERVISOR=1`,
-2. spawns child process,
-3. waits for one of:
-   - child exit,
-   - file change trigger (hot-reload path),
-4. applies restart policy.
+## Supervision policy
 
-## Restart policy
+Each agent runs in `_supervised_run(...)` with health tracking.
 
-- exit code `0`: clean shutdown, supervisor exits
-- exit code `42`: immediate restart (`EXIT_RESTART`)
-- file change (`*.py` under `ductor_bot/`): immediate restart
-- other non-zero exit: exponential backoff restart
-  - fast-crash threshold: `<10s`
-  - max backoff: `30s`
+- normal exit: task ends
+- exit code `42`:
+  - sub-agent: in-process restart (stack rebuild)
+  - main agent: propagate restart to process/service runtime
+- crash: exponential backoff restarts (max 5 retries), then mark `crashed`
 
-## Signal handling
+## Dynamic agent registry
 
-- supervisor sends `SIGTERM` to child first
-- waits up to `10s`
-- escalates to `SIGKILL` if needed
+`FileWatcher` polls `agents.json` (5s).
 
-On POSIX, `SIGINT`/`SIGTERM` are wired to cancel the supervisor task.
+- added entry: start sub-agent
+- removed entry: stop sub-agent
+- changed `telegram_token`: restart sub-agent
+- other config field changes in `agents.json` currently do not trigger auto-restart
 
-## When to use
+## Orchestrator hook injection
 
-Use the supervisor only when you explicitly want restart/backoff + optional hot-reload behavior around the normal bot entrypoint.
+During bot startup, supervisor injects hooks into each agent dispatcher.
+
+- sets `orch._supervisor`
+- on main agent: registers multi-agent commands (`/agents`, `/agent_start`, `/agent_stop`, `/agent_restart`)
+
+## Shutdown
+
+`stop_all()` stops watcher/API/shared sync, cancels in-flight async inter-agent tasks, then stops sub-agents before main.

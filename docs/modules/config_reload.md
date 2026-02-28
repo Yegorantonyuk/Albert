@@ -10,7 +10,7 @@ Centralized runtime config hot-reload watcher.
 
 Avoid unnecessary restarts when safe `config.json` fields change.
 
-`ConfigReloader` polls `~/.ductor/config/config.json` every 5 seconds, validates with `AgentConfig`, diffs top-level fields, and:
+`ConfigReloader` polls `~/.ductor/config/config.json` every 5 seconds, validates with `AgentConfig`, diffs top-level schema fields, and:
 
 - applies hot-reloadable fields immediately,
 - logs restart-required field changes through callback.
@@ -29,12 +29,18 @@ Avoid unnecessary restarts when safe `config.json` fields change.
 - `permission_mode`, `file_access`, `user_timezone`
 - `streaming`, `heartbeat`, `cleanup`, `cli_parameters`
 
+Important runtime nuance:
+
+- `heartbeat` and `cleanup` values are hot-applied to config objects, but observer lifecycle is not toggled on reload.
+- if heartbeat/cleanup were disabled at startup, switching `enabled=true` requires restart.
+- when already running, updated values are picked up on subsequent loop cycles.
+
 ## Restart-required fields
 
 - `telegram_token`, `allowed_user_ids`
 - `docker`, `api`, `webhooks`
 - `ductor_home`, `log_level`, `gemini_api_key`
-- unknown top-level fields default to restart-required
+- restart classification is schema-based over `AgentConfig` top-level fields
 
 ## Wiring
 

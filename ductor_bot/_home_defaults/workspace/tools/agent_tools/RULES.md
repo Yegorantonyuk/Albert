@@ -3,34 +3,64 @@
 Tools for inter-agent communication and shared knowledge.
 Agent creation and removal are only available on the main agent.
 
-## Available Tools
+## How users interact with sub-agents
+
+Each sub-agent is a **separate Telegram bot** with its own chat. The user has two options:
+
+1. **Direct chat** — The user opens the sub-agent's Telegram bot and chats
+   directly. This is the primary way to use a sub-agent.
+2. **Delegation** — The user asks the main agent to send a task via agent tools.
+   The response comes back to the main agent's chat, NOT the sub-agent's chat.
+
+**After creating a sub-agent, tell the user to open its Telegram chat to
+talk to it directly.** Do NOT show `python3 tools/...` commands to the user —
+those are internal tools for agent-to-agent communication only.
+
+## Available Tools (internal, not user-facing)
 
 | Tool | Purpose | Availability |
 |------|---------|-------------|
-| `ask_agent.py` | Send a synchronous message to another agent (blocks until response) | All agents |
-| `ask_agent_async.py` | Send an async message (returns immediately, response via Telegram) | All agents |
+| `ask_agent.py` | Ask a sub-agent a question (sync, blocks until response) | All agents |
+| `ask_agent_async.py` | Give a sub-agent a task (async, response comes back to YOU) | All agents |
 | `edit_shared_knowledge.py` | View or edit SHAREDMEMORY.md (synced to all agents) | All agents |
 | `create_agent.py` | Create a new sub-agent (writes to `agents.json`, auto-detected) | Main only |
 | `remove_agent.py` | Remove a sub-agent from the registry | Main only |
 | `list_agents.py` | List all sub-agents and their configuration | Main only |
+
+## How agent-to-agent communication works
+
+**The response ALWAYS comes back to the calling agent.** There is no way
+to make a sub-agent reply directly in its own Telegram chat via these tools.
+
+    You (main) → send task to sub-agent → sub-agent processes → response returns to YOU
+
+**Never tell the user** that a sub-agent will "answer in its own chat" or
+"respond directly to the user" — that is not how these tools work.
 
 ## Creating Sub-Agents
 
 When creating a sub-agent:
 
 1. The user **must provide** a Telegram bot token (created via @BotFather)
-2. Choose a descriptive lowercase name (no spaces, e.g. `finanzius`, `codex`)
-3. Configure provider and model based on the agent's purpose
-4. The workspace is created automatically under `agents/<name>/`
-5. The sub-agent starts automatically within seconds (FileWatcher)
+2. Choose a descriptive lowercase name (no spaces, e.g. `finanzius`, `researcher`)
+3. Use **specific model names**, not provider names:
+   - Claude: `opus`, `sonnet`, `haiku`
+   - Codex: `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex-mini` (check `config/codex_models.json`)
+   - Gemini: `gemini-2.5-pro`, `gemini-2.5-flash` (check `config/gemini_models.json`)
+4. Provider is `claude`, `openai`, or `gemini`
+5. The workspace is created automatically under `agents/<name>/`
+6. The sub-agent starts automatically within seconds (FileWatcher)
+
+**IMPORTANT:** Never use `codex` or `gemini` as model names — those are providers.
+The `--model` must be a specific model ID from the lists above.
 
 ```bash
 python3 tools/agent_tools/create_agent.py \
   --name "agent-name" \
   --token "BOT_TOKEN" \
   --users "USER_ID1,USER_ID2" \
-  [--provider claude] \
-  [--model sonnet]
+  --provider openai \
+  --model gpt-5.3-codex
 ```
 
 ## Inter-Agent Communication
@@ -41,16 +71,18 @@ Two modes are available:
 ### Synchronous (blocking)
 
 Use `ask_agent.py` for quick lookups or simple questions. Your CLI turn
-blocks until the response arrives.
+blocks until the sub-agent responds. The response is returned to you
+directly as tool output.
 
 ```bash
 python3 tools/agent_tools/ask_agent.py "agent-name" "Quick question"
 ```
 
-### Asynchronous (fire-and-forget)
+### Asynchronous (long-running tasks)
 
-Use `ask_agent_async.py` for tasks that may take longer. Returns immediately
-with a task_id. The response is delivered to your Telegram chat when ready.
+Use `ask_agent_async.py` for tasks that take longer. Returns immediately
+with a task_id. The sub-agent's response is delivered back to **your**
+Telegram chat (the calling agent's chat) when ready.
 
 ```bash
 python3 tools/agent_tools/ask_agent_async.py "agent-name" "Complex request that takes time"

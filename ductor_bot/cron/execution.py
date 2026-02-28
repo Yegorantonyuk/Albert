@@ -206,18 +206,18 @@ def _force_kill(proc: asyncio.subprocess.Process) -> None:
     force_kill_process_tree(proc.pid)
 
 
-async def execute_one_shot(  # noqa: PLR0913
-    cmd: list[str],
+async def execute_one_shot(
+    one_shot: OneShotCommand,
     *,
     cwd: Path,
     provider: str,
     timeout_seconds: float,
     timeout_label: str,
-    stdin_input: bytes | None = None,
 ) -> OneShotExecutionResult:
     """Run one provider CLI command with timeout and normalized status/result."""
+    stdin_input = one_shot.stdin_input
     proc = await asyncio.create_subprocess_exec(
-        *cmd,
+        *one_shot.cmd,
         cwd=str(cwd),
         stdin=asyncio.subprocess.PIPE if stdin_input is not None else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,

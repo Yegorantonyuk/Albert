@@ -40,17 +40,28 @@ def _build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
     env["DUCTOR_AGENT_NAME"] = config.agent_name
     env["DUCTOR_AGENT_ROLE"] = "main" if config.agent_name == "main" else "sub"
     env["DUCTOR_INTERAGENT_PORT"] = str(config.interagent_port)
-    ductor_home = str(config.working_dir).removesuffix("/workspace")
-    env["DUCTOR_HOME"] = ductor_home
+    working_dir = Path(config.working_dir)
+    ductor_home = working_dir.parent if working_dir.name == "workspace" else working_dir
+    env["DUCTOR_HOME"] = str(ductor_home)
     # Shared knowledge is always at the main agent's home level.
     # For main: ductor_home itself. For sub-agents: ../../ from agents/<name>/.
     if config.agent_name == "main":
-        env["DUCTOR_SHARED_MEMORY_PATH"] = f"{ductor_home}/SHAREDMEMORY.md"
+        env["DUCTOR_SHARED_MEMORY_PATH"] = str(ductor_home / "SHAREDMEMORY.md")
     else:
         # Sub-agent home is <main_home>/agents/<name>/
-        main_home = str(Path(ductor_home).parent.parent)
-        env["DUCTOR_SHARED_MEMORY_PATH"] = f"{main_home}/SHAREDMEMORY.md"
+        main_home = ductor_home.parent.parent
+        env["DUCTOR_SHARED_MEMORY_PATH"] = str(main_home / "SHAREDMEMORY.md")
     return env
+
+
+@dataclass(slots=True)
+class SubprocessSpec:
+    """What to run: command, working directory, prompt, and timeout."""
+
+    exec_cmd: list[str]
+    use_cwd: str | None
+    prompt: str
+    timeout_seconds: float | None = None
 
 
 @dataclass(slots=True)
@@ -86,12 +97,9 @@ async def _default_post_handler(result: SubprocessResult) -> AsyncGenerator[Stre
         )
 
 
-async def run_streaming_subprocess(  # noqa: PLR0913
+async def run_streaming_subprocess(
     config: CLIConfig,
-    exec_cmd: list[str],
-    use_cwd: str | None,
-    prompt: str,
-    timeout_seconds: float | None,
+    spec: SubprocessSpec,
     line_handler: LineHandler,
     *,
     provider_label: str = "CLI",
@@ -109,13 +117,13 @@ async def run_streaming_subprocess(  # noqa: PLR0913
     7. Cleanup: cancel drain, unregister tracked process
     8. Post-loop: delegate to *post_handler* (default: yield error on non-zero exit)
     """
-    subprocess_env = _build_subprocess_env(config) if use_cwd else None
+    subprocess_env = _build_subprocess_env(config) if spec.use_cwd else None
     process = await asyncio.create_subprocess_exec(
-        *exec_cmd,
+        *spec.exec_cmd,
         stdin=_win_stdin_pipe(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=use_cwd,
+        cwd=spec.use_cwd,
         env=subprocess_env,
         limit=4 * 1024 * 1024,
         creationflags=_CREATION_FLAGS,
@@ -123,7 +131,7 @@ async def run_streaming_subprocess(  # noqa: PLR0913
     if process.stdout is None or process.stderr is None:
         msg = "Subprocess created without stdout/stderr pipes"
         raise RuntimeError(msg)
-    _win_feed_stdin(process, prompt)
+    _win_feed_stdin(process, spec.prompt)
     logger.info("%s subprocess starting pid=%s", provider_label, process.pid)
 
     reg = config.process_registry
@@ -131,7 +139,7 @@ async def run_streaming_subprocess(  # noqa: PLR0913
     stderr_drain = asyncio.create_task(process.stderr.read())
 
     try:
-        async with asyncio.timeout(timeout_seconds):
+        async with asyncio.timeout(spec.timeout_seconds):
             while True:
                 line_bytes = await process.stdout.readline()
                 if not line_bytes:
@@ -144,7 +152,7 @@ async def run_streaming_subprocess(  # noqa: PLR0913
     except TimeoutError:
         force_kill_process_tree(process.pid)
         await process.wait()
-        logger.warning("%s stream timed out after %.0fs", provider_label, timeout_seconds)
+        logger.warning("%s stream timed out after %.0fs", provider_label, spec.timeout_seconds)
         yield ResultEvent(type="result", result="", is_error=True)
         return
     finally:
@@ -164,12 +172,9 @@ async def run_streaming_subprocess(  # noqa: PLR0913
 # ---------------------------------------------------------------------------
 
 
-async def run_oneshot_subprocess(  # noqa: PLR0913
+async def run_oneshot_subprocess(
     config: CLIConfig,
-    exec_cmd: list[str],
-    use_cwd: str | None,
-    prompt: str,
-    timeout_seconds: float | None,
+    spec: SubprocessSpec,
     parse_output: Callable[[bytes, bytes, int | None], CLIResponse],
     *,
     provider_label: str = "CLI",
@@ -183,13 +188,13 @@ async def run_oneshot_subprocess(  # noqa: PLR0913
     4. Handle timeout
     5. Parse output via *parse_output* callback
     """
-    oneshot_env = _build_subprocess_env(config) if use_cwd else None
+    oneshot_env = _build_subprocess_env(config) if spec.use_cwd else None
     process = await asyncio.create_subprocess_exec(
-        *exec_cmd,
+        *spec.exec_cmd,
         stdin=_win_stdin_pipe(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=use_cwd,
+        cwd=spec.use_cwd,
         env=oneshot_env,
         creationflags=_CREATION_FLAGS,
     )
@@ -198,13 +203,13 @@ async def run_oneshot_subprocess(  # noqa: PLR0913
     reg = config.process_registry
     tracked = reg.register(config.chat_id, process, config.process_label) if reg else None
     try:
-        stdin_data = prompt.encode() if _IS_WINDOWS else None
-        async with asyncio.timeout(timeout_seconds):
+        stdin_data = spec.prompt.encode() if _IS_WINDOWS else None
+        async with asyncio.timeout(spec.timeout_seconds):
             stdout, stderr = await process.communicate(input=stdin_data)
     except TimeoutError:
         force_kill_process_tree(process.pid)
         await process.wait()
-        logger.warning("%s timed out after %.0fs", provider_label, timeout_seconds)
+        logger.warning("%s timed out after %.0fs", provider_label, spec.timeout_seconds)
         return CLIResponse(result="", is_error=True, timed_out=True)
     finally:
         if tracked and reg:

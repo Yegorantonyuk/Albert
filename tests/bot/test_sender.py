@@ -16,14 +16,14 @@ class TestSendRich:
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
-        await send_rich(bot, chat_id=1, text="Hello world")
+        await send_rich(bot, 1, "Hello world")
         bot.send_message.assert_called_once()
         call_kwargs = bot.send_message.call_args.kwargs
         assert call_kwargs["chat_id"] == 1
         assert "Hello world" in call_kwargs["text"]
 
     async def test_file_tags_extracted_and_sent(self, tmp_path: Path) -> None:
-        from ductor_bot.bot.sender import send_rich
+        from ductor_bot.bot.sender import SendRichOpts, send_rich
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
@@ -33,25 +33,27 @@ class TestSendRich:
         bot.send_document = AsyncMock()
 
         text = f"Here is a file <file:{test_file}>"
-        await send_rich(bot, chat_id=1, text=text, allowed_roots=[tmp_path])
+        await send_rich(bot, 1, text, SendRichOpts(allowed_roots=[tmp_path]))
         bot.send_message.assert_called_once()
         bot.send_document.assert_called_once()
 
     async def test_reply_to_first_chunk(self) -> None:
-        from ductor_bot.bot.sender import send_rich
+        from ductor_bot.bot.sender import SendRichOpts, send_rich
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
         reply_msg = MagicMock()
         reply_msg.message_id = 42
 
-        await send_rich(bot, chat_id=1, text="reply text", reply_to=reply_msg)
+        await send_rich(
+            bot, 1, "reply text", SendRichOpts(reply_to_message_id=reply_msg.message_id)
+        )
         bot.send_message.assert_called_once()
         call_kwargs = bot.send_message.call_args.kwargs
         assert call_kwargs["reply_parameters"].message_id == 42
 
     async def test_empty_text_with_file_still_sends_file(self, tmp_path: Path) -> None:
-        from ductor_bot.bot.sender import send_rich
+        from ductor_bot.bot.sender import SendRichOpts, send_rich
 
         test_file = tmp_path / "data.csv"
         test_file.write_text("a,b,c")
@@ -60,7 +62,7 @@ class TestSendRich:
         bot.send_message = AsyncMock()
         bot.send_document = AsyncMock()
 
-        await send_rich(bot, chat_id=1, text=f"<file:{test_file}>", allowed_roots=[tmp_path])
+        await send_rich(bot, 1, f"<file:{test_file}>", SendRichOpts(allowed_roots=[tmp_path]))
         bot.send_document.assert_called_once()
 
     async def test_html_fallback_on_bad_request(self) -> None:
@@ -74,7 +76,7 @@ class TestSendRich:
             side_effect=[TelegramBadRequest(MagicMock(), "bad HTML"), None],
         )
 
-        await send_rich(bot, chat_id=1, text="test")
+        await send_rich(bot, 1, "test")
         assert bot.send_message.call_count == 2
 
 
@@ -90,7 +92,7 @@ class TestSendRichButtons:
         bot.send_message = AsyncMock(return_value=sent_msg)
         bot.edit_message_reply_markup = AsyncMock()
 
-        await send_rich(bot, chat_id=1, text="Pick:\n\n[button:Yes] [button:No]")
+        await send_rich(bot, 1, "Pick:\n\n[button:Yes] [button:No]")
         bot.edit_message_reply_markup.assert_called_once()
         markup = bot.edit_message_reply_markup.call_args.kwargs["reply_markup"]
         assert len(markup.inline_keyboard) == 1
@@ -104,7 +106,7 @@ class TestSendRichButtons:
         bot.send_message = AsyncMock()
         bot.edit_message_reply_markup = AsyncMock()
 
-        await send_rich(bot, chat_id=1, text="No buttons")
+        await send_rich(bot, 1, "No buttons")
         bot.edit_message_reply_markup.assert_not_called()
 
     async def test_send_rich_buttons_stripped_from_displayed_text(self) -> None:
@@ -116,13 +118,13 @@ class TestSendRichButtons:
         bot.send_message = AsyncMock(return_value=sent_msg)
         bot.edit_message_reply_markup = AsyncMock()
 
-        await send_rich(bot, chat_id=1, text="Hello\n\n[button:Go]")
+        await send_rich(bot, 1, "Hello\n\n[button:Go]")
         call_text = bot.send_message.call_args.kwargs["text"]
         assert "[button:" not in call_text
         assert "Hello" in call_text
 
     async def test_send_rich_buttons_with_reply_to(self) -> None:
-        from ductor_bot.bot.sender import send_rich
+        from ductor_bot.bot.sender import SendRichOpts, send_rich
 
         bot = MagicMock()
         sent_msg = MagicMock()
@@ -132,7 +134,9 @@ class TestSendRichButtons:
         reply_msg.message_id = 99
         bot.edit_message_reply_markup = AsyncMock()
 
-        await send_rich(bot, chat_id=1, text="X\n[button:Ok]", reply_to=reply_msg)
+        await send_rich(
+            bot, 1, "X\n[button:Ok]", SendRichOpts(reply_to_message_id=reply_msg.message_id)
+        )
         bot.edit_message_reply_markup.assert_called_once()
         assert bot.edit_message_reply_markup.call_args.kwargs["message_id"] == 77
 
@@ -389,7 +393,7 @@ class TestWindowsTagNormalizationInSendRich:
             patch("ductor_bot.files.tags.is_windows", return_value=True),
             patch("ductor_bot.bot.sender.send_file", new_callable=AsyncMock) as mock_send_file,
         ):
-            await send_rich(bot, chat_id=1, text="<file:/C/Users/alice/result.apk>")
+            await send_rich(bot, 1, "<file:/C/Users/alice/result.apk>")
 
         sent_path = mock_send_file.call_args.args[2]
         assert str(sent_path).replace("\\", "/") == "C:/Users/alice/result.apk"
@@ -399,11 +403,11 @@ class TestForumTopicSupport:
     """Test message_thread_id propagation through sender functions."""
 
     async def test_send_rich_passes_thread_id(self) -> None:
-        from ductor_bot.bot.sender import send_rich
+        from ductor_bot.bot.sender import SendRichOpts, send_rich
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
-        await send_rich(bot, chat_id=1, text="Hello", thread_id=77)
+        await send_rich(bot, 1, "Hello", SendRichOpts(thread_id=77))
         assert bot.send_message.call_args.kwargs["message_thread_id"] == 77
 
     async def test_send_rich_thread_id_none_by_default(self) -> None:
@@ -411,11 +415,11 @@ class TestForumTopicSupport:
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
-        await send_rich(bot, chat_id=1, text="Hello")
+        await send_rich(bot, 1, "Hello")
         assert bot.send_message.call_args.kwargs.get("message_thread_id") is None
 
     async def test_send_rich_passes_thread_id_to_files(self, tmp_path: Path) -> None:
-        from ductor_bot.bot.sender import send_rich
+        from ductor_bot.bot.sender import SendRichOpts, send_rich
 
         doc = tmp_path / "data.csv"
         doc.write_text("a,b")
@@ -423,7 +427,7 @@ class TestForumTopicSupport:
         bot = MagicMock()
         bot.send_message = AsyncMock()
         bot.send_document = AsyncMock()
-        await send_rich(bot, chat_id=1, text=f"Here <file:{doc}>", thread_id=55)
+        await send_rich(bot, 1, f"Here <file:{doc}>", SendRichOpts(thread_id=55))
         assert bot.send_document.call_args.kwargs["message_thread_id"] == 55
 
     async def test_send_file_passes_thread_id_to_document(self, tmp_path: Path) -> None:
@@ -505,12 +509,12 @@ class TestForumTopicSupport:
         assert bot.send_document.call_args.kwargs["message_thread_id"] == 44
 
     async def test_html_fallback_preserves_thread_id(self) -> None:
-        from ductor_bot.bot.sender import send_rich
+        from ductor_bot.bot.sender import SendRichOpts, send_rich
 
         bot = MagicMock()
         bot.send_message = AsyncMock(
             side_effect=[TelegramBadRequest(MagicMock(), "bad HTML"), None],
         )
-        await send_rich(bot, chat_id=1, text="test", thread_id=88)
+        await send_rich(bot, 1, "test", SendRichOpts(thread_id=88))
         for call in bot.send_message.call_args_list:
             assert call.kwargs["message_thread_id"] == 88

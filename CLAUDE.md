@@ -60,6 +60,7 @@ Telegram Update
 | `heartbeat/` | periodic proactive checks in active sessions |
 | `cleanup/` | daily retention cleanup |
 | `workspace/` | home seeding, rules deployment/sync, skill sync |
+| `multiagent/` | multi-agent supervisor, inter-agent bus, shared knowledge, health monitoring |
 | `infra/` | PID lock, service backends, Docker manager, update/restart helpers |
 
 ## Key Runtime Patterns
@@ -91,6 +92,14 @@ All run as in-process asyncio tasks:
 - skill sync watcher
 - update observer (upgradeable installs)
 
+Optional multi-agent system (when `agents.json` is present):
+
+- `AgentSupervisor` (manages main + sub-agents with crash recovery)
+- `InterAgentBus` (in-memory sync + async messaging)
+- `InternalAgentAPI` (`127.0.0.1:8799`, bridges CLI tools to bus)
+- `SharedKnowledgeSync` (`SHAREDMEMORY.md` -> all agents' `MAINMEMORY.md`)
+- `FileWatcher` on `agents.json` (auto-detect add/remove/change)
+
 ## Service Backends
 
 - Linux: systemd user service
@@ -115,6 +124,9 @@ All run as in-process asyncio tasks:
 | `ductor docker disable` | Stop container, set `docker.enabled = false` |
 | `ductor service install` | Install as background service |
 | `ductor service [sub]` | Service management (status/stop/logs/...) |
+| `ductor agents` | List all sub-agents and their config |
+| `ductor agents add <name>` | Add a new sub-agent (interactive) |
+| `ductor agents remove <name>` | Remove a sub-agent |
 
 ## Data Files (`~/.ductor`)
 
@@ -122,6 +134,9 @@ All run as in-process asyncio tasks:
 - `sessions.json`
 - `cron_jobs.json`
 - `webhooks.json`
+- `agents.json`
+- `SHAREDMEMORY.md`
+- `agents/<name>/` (sub-agent workspaces)
 - `logs/agent.log`
 
 ## Conventions

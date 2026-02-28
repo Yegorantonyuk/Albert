@@ -16,7 +16,7 @@ from ductor_bot.webhook.auth import RateLimiter, validate_hook_auth
 if TYPE_CHECKING:
     from ductor_bot.config import WebhookConfig
     from ductor_bot.webhook.manager import WebhookManager
-    from ductor_bot.webhook.models import WebhookResult
+    from ductor_bot.webhook.models import WebhookEntry, WebhookResult
 
 logger = logging.getLogger(__name__)
 
@@ -79,25 +79,22 @@ class WebhookServer:
     async def _handle_health(self, _request: web.Request) -> web.Response:
         return web.json_response({"status": "ok"})
 
-    async def _handle_hook(self, request: web.Request) -> web.Response:  # noqa: PLR0911
-        hook_id = request.match_info["hook_id"]
-        set_log_context(operation="wh")
-        logger.info("Webhook request received hook=%s method=%s", hook_id, request.method)
-
-        # 1. Rate limit
+    async def _parse_body(
+        self,
+        request: web.Request,
+        hook_id: str,
+    ) -> tuple[dict[str, Any], bytes] | web.Response:
+        """Parse and validate the request body. Returns (payload, raw_body) or error."""
         if not self._rate_limiter.check():
             logger.warning("Webhook rejected: rate limited hook=%s", hook_id)
             return web.json_response({"error": "rate_limited"}, status=429)
 
-        # 2. Content-Type
         if request.content_type != "application/json":
             logger.warning("Webhook rejected: bad content-type hook=%s", hook_id)
             return web.json_response({"error": "content_type_must_be_json"}, status=415)
 
-        # 3. Read raw body (needed for both JSON parsing and HMAC validation)
         raw_body = await request.read()
 
-        # 4. Parse JSON
         try:
             payload: Any = json.loads(raw_body)
         except (json.JSONDecodeError, ValueError):
@@ -108,7 +105,15 @@ class WebhookServer:
             logger.warning("Webhook rejected: body not object hook=%s", hook_id)
             return web.json_response({"error": "body_must_be_object"}, status=400)
 
-        # 5. Look up hook
+        return payload, raw_body
+
+    def _resolve_hook(
+        self,
+        request: web.Request,
+        hook_id: str,
+        raw_body: bytes,
+    ) -> WebhookEntry | web.Response:
+        """Look up and authenticate the hook. Returns the hook or an error response."""
         hook = self._manager.get_hook(hook_id)
         if hook is None:
             logger.warning("Webhook rejected: not found hook=%s", hook_id)
@@ -118,7 +123,6 @@ class WebhookServer:
             logger.warning("Webhook rejected: disabled hook=%s", hook_id)
             return web.json_response({"error": "hook_disabled"}, status=403)
 
-        # 6. Per-hook auth (bearer token or HMAC signature)
         auth_header = request.headers.get("Authorization", "")
         sig_value = request.headers.get(hook.hmac_header, "") if hook.hmac_header else ""
         if not validate_hook_auth(
@@ -131,9 +135,25 @@ class WebhookServer:
             logger.warning("Webhook rejected: unauthorized hook=%s", hook_id)
             return web.json_response({"error": "unauthorized"}, status=401)
 
+        return hook
+
+    async def _handle_hook(self, request: web.Request) -> web.Response:
+        hook_id = request.match_info["hook_id"]
+        set_log_context(operation="wh")
+        logger.info("Webhook request received hook=%s method=%s", hook_id, request.method)
+
+        body_result = await self._parse_body(request, hook_id)
+        if isinstance(body_result, web.Response):
+            return body_result
+
+        payload, raw_body = body_result
+
+        hook_result = self._resolve_hook(request, hook_id, raw_body)
+        if isinstance(hook_result, web.Response):
+            return hook_result
+
         logger.debug("Webhook validation passed hook=%s", hook_id)
 
-        # 7. Dispatch async (fire-and-forget to avoid HTTP timeout)
         if self._dispatch:
             task = asyncio.create_task(self._safe_dispatch(hook_id, payload))
             self._background_tasks.add(task)

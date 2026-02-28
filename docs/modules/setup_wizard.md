@@ -47,7 +47,8 @@ Return semantics:
 
 Caller behavior:
 
-- both default start path and onboarding/reset path call `_stop_bot()` first to avoid duplicate runtime instances,
+- default `ductor` start path does not call `_stop_bot()`; duplicate prevention is handled by PID lock (`acquire_lock(..., kill_existing=True)`),
+- onboarding/reset path calls `_stop_bot()` before running onboarding,
 - `ductor` default path: exits after successful service install; otherwise starts foreground bot
 - `ductor onboarding` / `ductor reset`: same behavior (no forced foreground start after successful service install)
 
@@ -57,9 +58,13 @@ Caller behavior:
 
 1. stop installed service backend first (prevents auto-respawn),
 2. terminate PID-file instance,
-3. kill remaining ductor processes (Windows includes pipx `pythonw` cleanup),
+3. on Windows: kill remaining ductor processes (includes pipx `pythonw` cleanup),
 4. wait briefly on Windows for file locks to release,
 5. stop/remove Docker container when enabled.
+
+Operational side effect:
+
+- commands that call `_stop_bot()` (`restart`, `upgrade`, `docker rebuild`) can stop a currently running service-managed instance and leave it stopped until started again.
 
 ## Smart reset (`run_smart_reset`)
 

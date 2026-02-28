@@ -86,6 +86,46 @@ Run tasks in the background while you keep chatting. Each session gets a unique 
 
 `@model` shortcuts resolve the provider automatically (`@opus` = Claude, `@flash` = Gemini, `@codex` = Codex).
 
+### Multi-agent system
+
+Run multiple CLIs as independent Telegram bots that can talk to each other. Each agent gets its own bot token, workspace, and memory — but they share knowledge through `SHAREDMEMORY.md`.
+
+**Setup:** Create a second bot via [@BotFather](https://t.me/BotFather), then:
+
+```bash
+ductor agents add codex-agent
+```
+
+**Example: Claude as main agent, Codex as sub-agent**
+
+```text
+# Each agent has its own Telegram chat — use them independently:
+Main chat (Claude):  "Explain the auth flow in this codebase"
+Sub-agent chat (Codex):  "Refactor the parser module"
+
+# Or delegate from main to sub-agent:
+Main chat:  "Ask codex-agent to write tests for the API module"
+  → Claude sends the task to Codex
+  → Codex executes, result comes back to your main chat
+
+# Async delegation — keep chatting while Codex works:
+Main chat:  "Give codex-agent a task: migrate the database schema"
+  → Returns immediately, you keep talking to Claude
+  → Codex finishes → result delivered to your main chat
+```
+
+**What you can do:**
+
+- Chat with each CLI in its own Telegram bot, simultaneously
+- Delegate tasks from main to sub-agent (sync or async)
+- Let Claude plan and Codex execute — or any combination
+- Share facts across all agents via shared memory
+
+```text
+/agents                     # Status of all agents with current model
+/agent_commands             # Full multi-agent command reference
+```
+
 ### Automation
 
 - **Cron jobs:** in-process scheduler with timezone support, per-job overrides, quiet hours
@@ -97,6 +137,7 @@ Run tasks in the background while you keep chatting. Each session gets a unique 
 
 - **Service manager:** Linux (systemd), macOS (launchd), Windows (Task Scheduler)
 - **Docker sandbox:** sidecar container with configurable host mounts
+- **Multi-agent runtime:** main agent + sub-agents, each with own Telegram bot, sync/async delegation, shared memory
 - **Auto-onboarding:** interactive setup wizard on first run
 - **Cross-tool skill sync:** shared skills across `~/.claude/`, `~/.codex/`, `~/.gemini/`
 
@@ -140,6 +181,8 @@ Session behavior:
 | `/showfiles` | Browse `~/.ductor/` |
 | `/diagnose` | Runtime diagnostics |
 | `/upgrade` | Check/apply updates |
+| `/agents` | Multi-agent status with current models |
+| `/agent_commands` | Multi-agent command reference |
 | `/info` | Version + links |
 
 ## CLI commands
@@ -158,6 +201,9 @@ ductor docker enable    # Enable Docker sandbox
 ductor docker rebuild   # Rebuild sandbox container
 ductor docker mount /path  # Add host mount
 
+ductor agents list      # List configured sub-agents
+ductor agents add NAME  # Add a sub-agent
+
 ductor api enable       # Enable WebSocket API (beta)
 ```
 
@@ -172,6 +218,8 @@ Full CLI reference: [`docs/modules/setup_wizard.md`](docs/modules/setup_wizard.m
   named_sessions.json       # Named background sessions
   cron_jobs.json            # Scheduled tasks
   webhooks.json             # Webhook definitions
+  agents.json                 # Sub-agent registry (optional)
+  agents/                     # Sub-agent workspaces
   CLAUDE.md / AGENTS.md / GEMINI.md  # Rule files
   logs/agent.log
   workspace/
@@ -190,7 +238,7 @@ Full config reference: [`docs/config.md`](docs/config.md)
 | [Architecture](docs/architecture.md) | Startup, routing, streaming, callbacks |
 | [Configuration](docs/config.md) | Config schema and merge behavior |
 | [Automation](docs/automation.md) | Cron, webhooks, heartbeat setup |
-| [Module docs](docs/modules/) | Per-module deep dives (24 modules) |
+| [Module docs](docs/modules/) | Per-module deep dives (21 modules) |
 
 ## Disclaimer
 

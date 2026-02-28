@@ -49,12 +49,11 @@ async def run_oneshot_task(
         )
 
     execution = await execute_one_shot(
-        one_shot.cmd,
+        one_shot,
         cwd=cwd,
         provider=exec_config.provider,
         timeout_seconds=timeout_seconds,
         timeout_label=timeout_label,
-        stdin_input=one_shot.stdin_input,
     )
 
     return TaskResult(

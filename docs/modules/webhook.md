@@ -9,6 +9,7 @@ HTTP ingress for external event triggers.
 - `auth.py`: bearer/hmac validation + rate limiter
 - `server.py`: aiohttp server and request validation chain
 - `observer.py`: server lifecycle, dispatch logic, watcher
+- `infra/task_runner.py` (shared): folder checks + one-shot task execution for webhook/cron/background
 
 ## Persistence
 
@@ -30,6 +31,11 @@ Auth fields:
 
 - `auth_mode` (`bearer` or `hmac`)
 - per-hook token/secret and hmac config options
+
+Bearer fallback behavior:
+
+- for `auth_mode="bearer"`, validation uses `hook.token` when set
+- otherwise it falls back to global `webhooks.token`
 
 Execution overrides (`cron_task`):
 

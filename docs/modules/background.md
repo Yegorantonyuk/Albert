@@ -48,7 +48,7 @@ Orchestrator integration (`orchestrator/core.py`):
 - created in `Orchestrator.create(...)`
 - submission API: `submit_named_session(...)`, `submit_named_followup_bg(...)`
 - listing API: `active_background_tasks(...)`
-- shared abort: `abort(chat_id)` cancels both CLI subprocesses and active background tasks
+- shared abort: `abort(chat_id)` cancels CLI subprocesses, cancels active background tasks, and ends all named sessions for that chat
 - shutdown: `_stop_observers()` calls `BackgroundObserver.shutdown()`
 
 Bot integration (`bot/app.py`):

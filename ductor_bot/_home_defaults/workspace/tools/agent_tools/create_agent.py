@@ -36,13 +36,98 @@ def _agents_path() -> Path:
     return direct
 
 
+_CLAUDE_MODELS = ("haiku", "sonnet", "opus")
+
+
+def _main_home() -> Path:
+    """Resolve the main agent's DUCTOR_HOME."""
+    import os
+
+    home = Path(os.environ.get("DUCTOR_HOME", str(Path.home() / ".ductor")))
+    if home.name != ".ductor" and (home.parent.parent / "config").is_dir():
+        return home.parent.parent
+    return home
+
+
+def _resolve_codex_model(model: str, home: Path) -> str:
+    """Validate/resolve a Codex model against the cached model list."""
+    cache_path = home / "config" / "codex_models.json"
+    if not cache_path.is_file():
+        return model
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        models = data.get("models", [])
+        valid_ids = [m["id"] for m in models if isinstance(m, dict)]
+        if model in valid_ids:
+            return model
+        for m in models:
+            if isinstance(m, dict) and m.get("is_default"):
+                print(f"Note: '{model}' is not a valid Codex model. Using default: {m['id']}")
+                return m["id"]
+        if valid_ids:
+            print(f"Note: '{model}' is not a valid Codex model. Using: {valid_ids[0]}")
+            return valid_ids[0]
+    except (json.JSONDecodeError, OSError, KeyError):
+        pass
+    return model
+
+
+def _resolve_gemini_model(model: str, home: Path) -> str:
+    """Validate/resolve a Gemini model against the cached model list."""
+    cache_path = home / "config" / "gemini_models.json"
+    if not cache_path.is_file():
+        return model
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        valid_ids = data.get("models", [])
+        if model in valid_ids:
+            return model
+        if valid_ids:
+            print(f"Note: '{model}' is not a valid Gemini model. Using: {valid_ids[0]}")
+            return valid_ids[0]
+    except (json.JSONDecodeError, OSError):
+        pass
+    return model
+
+
+def _resolve_model(provider: str | None, model: str | None) -> str | None:
+    """Validate model name against known models for the given provider.
+
+    Catches common mistakes like ``--model codex`` (provider name, not a model).
+    Uses cached model lists from ``config/codex_models.json`` and
+    ``config/gemini_models.json``, and hardcoded Claude models.
+    """
+    if model is None or provider is None:
+        return model
+
+    home = _main_home()
+
+    if provider == "claude":
+        if model in _CLAUDE_MODELS:
+            return model
+        print(f"Note: '{model}' is not a valid Claude model. Using: sonnet")
+        return "sonnet"
+
+    if provider in ("openai", "codex"):
+        return _resolve_codex_model(model, home)
+
+    if provider == "gemini":
+        return _resolve_gemini_model(model, home)
+
+    return model
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create a new sub-agent")
     parser.add_argument("--name", required=True, help="Agent name (lowercase, no spaces)")
     parser.add_argument("--token", required=True, help="Telegram bot token")
     parser.add_argument("--users", required=True, help="Comma-separated allowed user IDs")
-    parser.add_argument("--provider", default=None, help="AI provider (claude/codex/gemini)")
-    parser.add_argument("--model", default=None, help="Model name (opus/sonnet/haiku/...)")
+    parser.add_argument("--provider", default=None, help="AI provider (claude/openai/gemini)")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Specific model name (e.g. gpt-5.3-codex, opus, gemini-2.5-pro)",
+    )
     args = parser.parse_args()
 
     # Validate name
@@ -76,16 +161,24 @@ def main() -> None:
         print(f"Error: Agent '{name}' already exists.", file=sys.stderr)
         sys.exit(1)
 
+    # Normalize provider name (codex -> openai)
+    provider = args.provider
+    if provider == "codex":
+        provider = "openai"
+
+    # Resolve model against cached model lists
+    resolved_model = _resolve_model(provider, args.model)
+
     # Build agent entry
     entry: dict = {
         "name": name,
         "telegram_token": args.token,
         "allowed_user_ids": user_ids,
     }
-    if args.provider:
-        entry["provider"] = args.provider
-    if args.model:
-        entry["model"] = args.model
+    if provider:
+        entry["provider"] = provider
+    if resolved_model:
+        entry["model"] = resolved_model
 
     agents.append(entry)
 
@@ -96,11 +189,12 @@ def main() -> None:
     print(f"Agent '{name}' created successfully.")
     print(f"  Token: {args.token[:8]}...")
     print(f"  Users: {user_ids}")
-    if args.provider:
-        print(f"  Provider: {args.provider}")
-    if args.model:
-        print(f"  Model: {args.model}")
-    print(f"\nThe agent will start automatically within a few seconds.")
+    if provider:
+        print(f"  Provider: {provider}")
+    if resolved_model:
+        print(f"  Model: {resolved_model}")
+    print(f"\nThe agent starts automatically within a few seconds.")
+    print(f"The user can open the sub-agent's Telegram bot chat to talk to it directly.")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from ductor_bot.cli.auth import AuthStatus, check_all_auth
-from ductor_bot.config import CLAUDE_MODELS, get_gemini_models, update_config_file_async
+from ductor_bot.config import CLAUDE_MODELS_ORDERED, get_gemini_models, update_config_file_async
+from ductor_bot.multiagent.registry import update_agent_fields
 
 if TYPE_CHECKING:
     from ductor_bot.cli.codex_cache import CodexModelCache
@@ -258,6 +259,17 @@ async def switch_model(
 
     await update_config_file_async(orch.paths.config_path, **updates)
 
+    # Sub-agent: also sync model/provider/effort to agents.json so the
+    # registry stays current and survives restarts without merge hacks.
+    if orch.paths.ductor_home.parent.name == "agents":
+        agents_path = orch.paths.ductor_home.parent.parent / "agents.json"
+        agent_name = orch._cli_service._config.agent_name
+        registry_updates = dict(updates)
+        # Only Codex uses reasoning_effort — remove it when switching away
+        if new_provider != "codex" and "reasoning_effort" not in registry_updates:
+            registry_updates["reasoning_effort"] = None
+        await asyncio.to_thread(update_agent_fields, agents_path, agent_name, **registry_updates)
+
     logger.info("Model switch model=%s provider=%s", model_id, orch._config.provider)
 
     return _build_switch_summary(
@@ -311,7 +323,8 @@ async def _build_model_step(
     """Build the model selection keyboard for a provider."""
     if provider == "claude":
         buttons = [
-            InlineKeyboardButton(text=m.upper(), callback_data=f"ms:m:{m}") for m in CLAUDE_MODELS
+            InlineKeyboardButton(text=m.upper(), callback_data=f"ms:m:{m}")
+            for m in CLAUDE_MODELS_ORDERED
         ]
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[

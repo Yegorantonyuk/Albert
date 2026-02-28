@@ -69,7 +69,7 @@ class TestGeminiCacheObserver:
 
     async def test_observer_verifies_60_minute_interval(self) -> None:
         """Verify observer uses the expected refresh interval."""
-        from ductor_bot.cli.gemini_cache_observer import REFRESH_INTERVAL_S
+        from ductor_bot.cli.model_cache import REFRESH_INTERVAL_S
 
         assert REFRESH_INTERVAL_S == 3600
 

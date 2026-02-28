@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from ductor_bot.bot.sender import send_rich
+from ductor_bot.bot.sender import SendRichOpts, send_rich
 from ductor_bot.bot.topic import get_thread_id
 from ductor_bot.bot.typing import TypingContext
 from ductor_bot.text.response_format import new_session_text, stop_text
@@ -36,7 +36,12 @@ async def handle_abort(
     killed = await orchestrator.abort(chat_id)
     logger.info("Abort requested killed=%d", killed)
     text = stop_text(bool(killed), orchestrator.active_provider_name)
-    await send_rich(bot, chat_id, text, reply_to=message, thread_id=get_thread_id(message))
+    await send_rich(
+        bot,
+        chat_id,
+        text,
+        SendRichOpts(reply_to_message_id=message.message_id, thread_id=get_thread_id(message)),
+    )
     return True
 
 
@@ -53,9 +58,11 @@ async def handle_command(orchestrator: Orchestrator, bot: Bot, message: Message)
         bot,
         chat_id,
         result.text,
-        reply_to=message,
-        reply_markup=result.reply_markup,
-        thread_id=thread_id,
+        SendRichOpts(
+            reply_to_message_id=message.message_id,
+            reply_markup=result.reply_markup,
+            thread_id=thread_id,
+        ),
     )
 
 
@@ -70,8 +77,7 @@ async def handle_new_session(orchestrator: Orchestrator, bot: Bot, message: Mess
         bot,
         chat_id,
         new_session_text(provider),
-        reply_to=message,
-        thread_id=thread_id,
+        SendRichOpts(reply_to_message_id=message.message_id, thread_id=thread_id),
     )
 
 

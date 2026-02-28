@@ -16,7 +16,8 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`)
 10. `docs/modules/files.md` -- shared file parsing/storage/prompt helpers.
 11. `docs/modules/cli.md` -- provider wrappers, stream parsing, process control.
 12. `docs/modules/workspace.md` -- `~/.ductor` seeding, rule deployment/sync, runtime notices.
-13. Remaining module docs (`background`, `session`, `cron`, `webhook`, `heartbeat`, `cleanup`, `infra`, `supervisor`, `security`, `logging`, `skill_system`).
+13. `docs/modules/multiagent.md` -- multi-agent system, inter-agent communication, shared knowledge.
+14. Remaining module docs (`background`, `session`, `cron`, `webhook`, `heartbeat`, `cleanup`, `infra`, `supervisor`, `security`, `logging`, `skill_system`).
 
 ## System in 60 Seconds
 
@@ -34,6 +35,7 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`)
 - `ductor_bot/heartbeat/`: periodic proactive checks in active sessions.
 - `ductor_bot/cleanup/`: daily recursive retention cleanup for `telegram_files`, `output_to_user`, and `api_files` (plus empty-dir pruning).
 - `ductor_bot/workspace/`: path resolution, home seeding from `_home_defaults`, RULES variant deployment, rule sync, skill sync.
+- `ductor_bot/multiagent/`: multi-agent supervisor, inter-agent bus, shared knowledge sync, health monitoring, agent tool scripts.
 - `ductor_bot/infra/`: PID lock, restart/update sentinels, Docker manager (incl. optional user mounts), service backends (Linux/macOS/Windows), updater/version checks.
 
 Runtime behavior note:
@@ -67,4 +69,5 @@ Runtime behavior note:
   - [security](modules/security.md)
   - [infra](modules/infra.md)
   - [supervisor](modules/supervisor.md)
+  - [multiagent](modules/multiagent.md)
   - [logging](modules/logging.md)

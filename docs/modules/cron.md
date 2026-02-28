@@ -8,6 +8,7 @@ In-process cron scheduling with JSON persistence and one-shot CLI execution.
 - `observer.py`: `CronObserver` scheduling, watcher, execution pipeline
 - `execution.py`: provider command builders, result parsing, one-shot subprocess helper
 - `dependency_queue.py`: shared dependency locks (cron + webhook cron_task)
+- `infra/task_runner.py` (shared): folder checks + one-shot task execution for cron/webhook/background
 
 ## Cron job model
 
@@ -63,8 +64,8 @@ When a job fires:
 6. build provider command (`build_cmd`)
 7. execute one-shot subprocess with timeout
 8. parse provider output
-9. update run status
-10. invoke optional result callback
+9. invoke optional result callback
+10. update run status (`last_run_status`, `last_run_at`)
 11. schedule next occurrence
 
 ## Command builders (`execution.py`)
@@ -98,7 +99,10 @@ Typical values:
 - `error:timeout`
 - `error:exit_<code>`
 
-Quiet-hour skip currently does not write `last_run_status`.
+Quiet-hour skips are silent:
+
+- no `last_run_status` update
+- no Telegram result callback
 
 ## Timezone resolution
 

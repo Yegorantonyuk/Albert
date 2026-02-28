@@ -123,10 +123,25 @@ def docker_wrap(
     if config.docker_container:
         logger.debug("docker_wrap container=%s", config.docker_container)
         stdin_flag: list[str] = ["-i"] if interactive else []
+        working_dir = Path(config.working_dir)
+        ductor_home = working_dir.parent if working_dir.name == "workspace" else working_dir
+        if config.agent_name == "main":
+            shared_memory = ductor_home / "SHAREDMEMORY.md"
+        else:
+            shared_memory = ductor_home.parent.parent / "SHAREDMEMORY.md"
         env_flags: list[str] = [
-            "-e", f"DUCTOR_CHAT_ID={config.chat_id}",
-            "-e", f"DUCTOR_AGENT_NAME={config.agent_name}",
-            "-e", f"DUCTOR_INTERAGENT_PORT={config.interagent_port}",
+            "-e",
+            f"DUCTOR_CHAT_ID={config.chat_id}",
+            "-e",
+            f"DUCTOR_AGENT_NAME={config.agent_name}",
+            "-e",
+            f"DUCTOR_INTERAGENT_PORT={config.interagent_port}",
+            "-e",
+            f"DUCTOR_HOME={ductor_home}",
+            "-e",
+            f"DUCTOR_SHARED_MEMORY_PATH={shared_memory}",
+            "-e",
+            "DUCTOR_INTERAGENT_HOST=host.docker.internal",
         ]
         if extra_env:
             for key, value in extra_env.items():

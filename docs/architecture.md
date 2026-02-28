@@ -47,6 +47,13 @@ Optional network service:
 
 - `ApiServer`: direct WebSocket + HTTP file endpoints (`/ws`, `/health`, `/files`, `/upload`).
 
+Multi-agent runtime core (always active; sub-agents optional):
+
+- `AgentSupervisor`: bootstraps the main agent and manages dynamic sub-agents with crash recovery.
+- `InterAgentBus`: in-memory async message passing between agents.
+- `InternalAgentAPI`: localhost HTTP bridge (`127.0.0.1:8799`) for CLI tool scripts to reach the bus.
+- `SharedKnowledgeSync`: watches `SHAREDMEMORY.md` and injects content into all agents' `MAINMEMORY.md`.
+
 ## Startup Flow
 
 ### `ductor` (`ductor_bot/__main__.py`)
@@ -87,7 +94,7 @@ Default path:
 8. Start `GeminiCacheObserver` (`~/.ductor/config/gemini_models.json`) and refresh runtime Gemini model registry from its callback.
 9. Start `CodexCacheObserver` (`~/.ductor/config/codex_models.json`).
 10. Create `BackgroundObserver`, `CronObserver`, and `WebhookObserver` (cron/webhook share Codex cache).
-11. Start cron, heartbeat, webhook, cleanup observers.
+11. Start cron, heartbeat, webhook, cleanup observers (disabled observers no-op in `start()`).
 12. If `api.enabled=true`: start `ApiServer` (auto-generate token when empty, wire message/abort handlers and file context).
 13. Start rule-sync and skill-sync watcher tasks.
 14. Start `ConfigReloader` (`config.json` poll every 5s; hot fields applied, restart-required fields logged).
@@ -111,6 +118,7 @@ Default path:
   - `CLAUDE_MODELS` (`haiku`, `sonnet`, `opus`)
   - `_GEMINI_ALIASES` (`auto`, `pro`, `flash`, `flash-lite`)
   - dynamically discovered Gemini model IDs from local Gemini CLI files.
+- Parser token syntax is `@([a-zA-Z][a-zA-Z0-9_-]*)`; dots are not part of a directive token.
 - Other `@key` / `@key=value` directives are collected as raw directives.
 - Directive-only messages (`@sonnet`) return guidance text instead of executing.
 
@@ -124,7 +132,7 @@ Default path:
 
 1. Determine requested model/provider.
 2. Resolve session (`SessionManager.resolve_session`) with provider-isolated buckets.
-3. New session only: append `MAINMEMORY.md` as `append_system_prompt`.
+3. New session only: append `MAINMEMORY.md` as `append_system_prompt`, then append multi-agent roster context when available.
 4. Apply message hooks (`MAINMEMORY_REMINDER` every 6th message).
 5. Build `AgentRequest` with `resume_session` if available.
 6. Gemini safeguard: if target provider is Gemini, auth mode is API-key, and `gemini_api_key` in config is empty/`"null"`, return warning text and skip CLI call.
@@ -169,9 +177,9 @@ Per connection:
 1. `ws://<host>:<port>/ws` handshake.
 2. First frame must be auth JSON with token (10s timeout).
    - `auth_ok` returns E2E server key plus provider metadata (`providers`) and active runtime fields when available.
-3. Session `chat_id` defaults to `config.api.chat_id` (`>0`) or first `allowed_user_ids` entry (fallback `1`); auth payload may override.
+3. Session `chat_id` default is computed from `config.api.chat_id` using truthiness (`0` falls back to first `allowed_user_ids` entry, then `1`); auth payload may override with a positive int (no allowlist membership check).
 4. `message` frames run under per-`chat_id` lock and use streaming callbacks (`text_delta`, `tool_activity`, `system_status`, `result`).
-5. `abort` frame or `/stop` message calls orchestrator abort path (`ProcessRegistry.kill_all`).
+5. `abort` frame or `/stop` message calls orchestrator abort path (`abort(chat_id)`), which kills CLI processes, cancels background tasks, and ends named sessions for that chat.
 
 Additional HTTP endpoints:
 
@@ -209,8 +217,8 @@ Lock usage is path-dependent (e.g., queue cancel and upgrade callbacks are handl
 - `NamedSessionRegistry` enforces max 10 named sessions per chat and persists to `~/.ductor/named_sessions.json`.
 - Named sessions use `CLIService.execute()` with `resume_session` for follow-up persistence.
 - Follow-ups: `@session-name <message>` (foreground streaming) or `/session @session-name <message>` (background).
-- Completion callback (`TelegramBot._on_session_result`) sends a tagged Telegram message with session name and provider.
-- `/stop` cancels all active CLI subprocesses and background tasks for the chat.
+- Completion callback (`TelegramBot._on_session_result`) sends a tagged Telegram message with session name.
+- `/stop` kills active CLI subprocesses, cancels background tasks, and ends all named sessions for the chat.
 - `/sessions` shows interactive management UI with end/refresh controls.
 
 ### Cron flow
@@ -271,17 +279,7 @@ Lock usage is path-dependent (e.g., queue cancel and upgrade callbacks are handl
   - when supervisor env is present (`DUCTOR_SUPERVISOR` or `INVOCATION_ID`), process exits with `42`,
   - otherwise process re-execs itself (`_re_exec_bot`) for direct foreground usage.
 
-### Optional Supervisor (`ductor_bot/run.py`)
-
-- Runs child process `python -m ductor_bot`.
-- Optional hot-reload on `.py` changes (if `watchfiles` installed).
-- Restart conditions:
-  - exit `42` -> immediate restart,
-  - file change -> restart child,
-  - other crash -> exponential backoff.
-
-This wrapper is optional and separate from the default `ductor` CLI entrypoint.
-Detailed behavior: `docs/modules/supervisor.md`.
+Service backends (systemd/launchd/Task Scheduler) handle restart semantics in installed mode.
 
 ## Workspace Seeding Model
 
@@ -293,7 +291,7 @@ Copy rules in `workspace/init.py` (`_walk_and_copy`):
 
 - Zone 2 (always overwrite):
   - `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`
-  - `.py` files in `workspace/tools/cron_tools/` and `workspace/tools/webhook_tools/`
+  - `.py` files in `workspace/tools/cron_tools/`, `workspace/tools/webhook_tools/`, and `workspace/tools/agent_tools/`
 - Zone 3 (seed once): all other files.
 - `RULES*.md` templates are skipped in raw copy and deployed by `RulesSelector`.
 - Hidden/ignored dirs are skipped.
@@ -313,9 +311,35 @@ Rule deployment (`workspace/rules_selector.py`):
 
 ## Logging Context
 
-- `log_context.py` uses `ContextVar` fields (`operation`, `chat_id`, `session_id`) to enrich logs as `[op:chat_id:session_id_8]`.
-- ingress operation labels: `msg`, `cb`, `cron`, `hb`, `wh`, `api`.
+- `log_context.py` uses `ContextVar` fields (`agent_name`, `operation`, `chat_id`, `session_id`) to enrich logs as `[agent:op:chat_id:session_id_8]` (missing fields omitted).
+- ingress operation labels include: `msg`, `cb`, `cron`, `hb`, `wh`, `api`, `ia-async`.
+- multi-agent supervisor sets `agent_name` per agent task, so all agents can share one central log file with clear attribution.
 - `logging_config.py` configures colored console logs and rotating file logs (`~/.ductor/logs/agent.log`).
+
+## Multi-Agent System
+
+Always-on supervisor model: main agent always runs under `AgentSupervisor`; sub-agents are optional.
+
+```text
+AgentSupervisor
+  +-- AgentStack "main"    (TelegramBot -> Orchestrator -> CLIService)
+  +-- AgentStack "sub-1"   (TelegramBot -> Orchestrator -> CLIService)
+  +-- AgentStack "sub-2"   (TelegramBot -> Orchestrator -> CLIService)
+  +-- InterAgentBus        (in-memory sync + async messaging)
+  +-- InternalAgentAPI     (127.0.0.1:8799, bridges CLI tools to bus)
+  +-- SharedKnowledgeSync  (SHAREDMEMORY.md -> all agents' MAINMEMORY.md)
+```
+
+Each sub-agent has its own Telegram bot token, workspace, sessions, and CLI service. Agents communicate via the `InterAgentBus` (in-memory) or `InternalAgentAPI` (localhost HTTP for CLI tool scripts).
+
+`AgentSupervisor` watches `agents.json` via `FileWatcher` and auto-starts/stops agents on changes (running-agent auto-restart is currently token-change driven). Each agent runs in a supervised asyncio task with crash recovery (exponential backoff, max 5 retries). Sub-agent restart requests (exit code 42) trigger in-process hot-reload; main agent restart requests propagate to the service/runtime restart path.
+
+Inter-agent execution nuance:
+
+- sync inter-agent turns run via `Orchestrator.handle_interagent_message()` with synthetic `chat_id=0`
+- async inter-agent result delivery is routed to the agent's first allowed user ID
+
+Detailed behavior: `docs/modules/multiagent.md`.
 
 ## Core Design Trade-offs
 

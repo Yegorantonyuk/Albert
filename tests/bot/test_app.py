@@ -189,8 +189,19 @@ class TestTelegramBotRun:
             bot_instance,
             allowed_updates=["message", "callback_query"],
             close_bot_session=True,
+            handle_signals=False,
         )
         assert code == 0
+
+    async def test_run_disables_aiogram_signal_handling(self) -> None:
+        """start_polling must receive handle_signals=False so that aiogram
+        does not overwrite the supervisor's SIGINT/SIGTERM handler."""
+        tg_bot, _bot_instance = _make_tg_bot()
+        tg_bot._dp.resolve_used_update_types = MagicMock(return_value=["message"])
+        tg_bot._dp.start_polling = AsyncMock()
+        await tg_bot.run()
+        kwargs = tg_bot._dp.start_polling.call_args.kwargs
+        assert kwargs.get("handle_signals") is False
 
     async def test_shutdown_cleans_up(self) -> None:
         tg_bot, _ = _make_tg_bot()
@@ -208,6 +219,23 @@ class TestTelegramBotRun:
         tg_bot._restart_watcher = asyncio.create_task(asyncio.sleep(100))
         await tg_bot.shutdown()
         assert tg_bot._restart_watcher.cancelled()
+
+    async def test_shutdown_releases_polling_session(self) -> None:
+        """shutdown() must stop polling, delete webhook, and close the bot session
+        so that a restarted instance doesn't hit TelegramConflictError."""
+        tg_bot, bot_instance = _make_tg_bot()
+        tg_bot._orchestrator = MagicMock()
+        tg_bot._orchestrator.shutdown = AsyncMock()
+
+        tg_bot._dp.stop_polling = AsyncMock()
+        bot_instance.session = MagicMock()
+        bot_instance.session.close = AsyncMock()
+
+        await tg_bot.shutdown()
+
+        tg_bot._dp.stop_polling.assert_called_once()
+        bot_instance.delete_webhook.assert_called_once_with(drop_pending_updates=False)
+        bot_instance.session.close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +305,8 @@ class TestOnHelp:
 
         await tg_bot._on_help(msg)
 
-        assert mock_send.call_args.kwargs["reply_to"] is msg
+        opts = mock_send.call_args[0][3]
+        assert opts.reply_to_message_id == msg.message_id
 
 
 # ---------------------------------------------------------------------------
@@ -1177,24 +1206,66 @@ class TestWatchRestartMarker:
 
 class TestSyncCommands:
     async def test_sets_commands_when_different(self) -> None:
+        from ductor_bot.bot.app import _BOT_COMMANDS
+
         tg_bot, bot_instance = _make_tg_bot()
         bot_instance.get_my_commands = AsyncMock(return_value=[])
         bot_instance.set_my_commands = AsyncMock()
+        bot_instance.delete_my_commands = AsyncMock()
 
         await tg_bot._sync_commands()
 
-        bot_instance.set_my_commands.assert_called_once()
+        bot_instance.set_my_commands.assert_called_once_with(_BOT_COMMANDS)
 
     async def test_skips_when_commands_match(self) -> None:
         from ductor_bot.bot.app import _BOT_COMMANDS
 
         tg_bot, bot_instance = _make_tg_bot()
-        bot_instance.get_my_commands = AsyncMock(return_value=list(_BOT_COMMANDS))
+        desired = list(_BOT_COMMANDS)
+        bot_instance.get_my_commands = AsyncMock(return_value=desired)
         bot_instance.set_my_commands = AsyncMock()
+        bot_instance.delete_my_commands = AsyncMock()
 
         await tg_bot._sync_commands()
 
         bot_instance.set_my_commands.assert_not_called()
+
+    async def test_clears_legacy_scoped_commands(self) -> None:
+        """Old scoped commands (private/group) are deleted on sync."""
+        from aiogram.types import BotCommand
+
+        from ductor_bot.bot.app import _BOT_COMMANDS
+
+        tg_bot, bot_instance = _make_tg_bot()
+        legacy = [BotCommand(command="old", description="legacy")]
+
+        async def _get_my_commands(**kwargs: object) -> list[BotCommand]:
+            if kwargs.get("scope"):
+                return legacy
+            return list(_BOT_COMMANDS)
+
+        bot_instance.get_my_commands = AsyncMock(side_effect=_get_my_commands)
+        bot_instance.set_my_commands = AsyncMock()
+        bot_instance.delete_my_commands = AsyncMock()
+
+        await tg_bot._sync_commands()
+
+        assert bot_instance.delete_my_commands.call_count == 2
+        bot_instance.set_my_commands.assert_not_called()
+
+    async def test_updates_when_order_changes(self) -> None:
+        """Reordering commands triggers an update (not just content diff)."""
+        from ductor_bot.bot.app import _BOT_COMMANDS
+
+        tg_bot, bot_instance = _make_tg_bot()
+        reversed_cmds = list(reversed(_BOT_COMMANDS))
+        bot_instance.get_my_commands = AsyncMock(return_value=reversed_cmds)
+        bot_instance.set_my_commands = AsyncMock()
+        bot_instance.delete_my_commands = AsyncMock()
+
+        await tg_bot._sync_commands()
+
+        bot_instance.set_my_commands.assert_called_once_with(_BOT_COMMANDS)
 
 
 # ---------------------------------------------------------------------------
@@ -1302,7 +1373,8 @@ class TestForumTopicPropagation:
 
         await tg_bot._on_help(msg)
 
-        assert mock_send.call_args.kwargs["thread_id"] == 33
+        opts = mock_send.call_args[0][3]
+        assert opts.thread_id == 33
 
     @patch("ductor_bot.bot.app.send_rich", new_callable=AsyncMock)
     async def test_on_restart_passes_thread_id(self, mock_send: AsyncMock) -> None:
@@ -1314,4 +1386,5 @@ class TestForumTopicPropagation:
         with patch("ductor_bot.infra.restart.write_restart_sentinel"):
             await tg_bot._on_restart(msg)
 
-        assert mock_send.call_args.kwargs["thread_id"] == 44
+        opts = mock_send.call_args[0][3]
+        assert opts.thread_id == 44

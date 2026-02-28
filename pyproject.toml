@@ -90,7 +90,7 @@ include = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-extend-exclude = ["ductor_bot/_home_defaults"]
+extend-exclude = ["ductor_bot/_home_defaults", ".claude"]
 
 [tool.ruff.lint]
 select = ["ALL"]

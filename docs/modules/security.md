@@ -40,7 +40,7 @@ Current use in orchestrator: log warning only.
 `validate_file_path()`:
 
 1. reject null bytes,
-2. reject control characters,
+2. reject control characters (newline `\\n` is explicitly allowed),
 3. resolve to absolute path,
 4. require containment in one of `allowed_roots` via `is_relative_to`.
 
@@ -52,3 +52,4 @@ Current call sites:
 
 - Telegram file send path (`bot/sender.py`)
 - API file download endpoint (`api/server.py`)
+- file-browser directory navigation guard (`bot/file_browser.py`)

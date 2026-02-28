@@ -82,6 +82,12 @@ async def _ws_send(ws: web.WebSocketResponse, data: dict[str, object]) -> bool:
     return True
 
 
+async def _ws_reject(ws: web.WebSocketResponse, code: str, message: str) -> None:
+    """Send an error response and close the WebSocket."""
+    await _ws_send(ws, {"type": "error", "code": code, "message": message})
+    await ws.close()
+
+
 class _SecureChannel:
     """Encrypted WebSocket channel for post-auth communication."""
 
@@ -281,7 +287,7 @@ class ApiServer:
         if self._allowed_roots is not None and not is_path_safe(file_path, self._allowed_roots):
             return web.json_response({"error": "path outside allowed roots"}, status=403)
 
-        if not file_path.is_file():  # noqa: ASYNC240
+        if not await asyncio.to_thread(file_path.is_file):
             return web.json_response({"error": "file not found"}, status=404)
 
         mime = guess_mime(file_path)
@@ -383,85 +389,54 @@ class ApiServer:
 
     # -- Authentication --------------------------------------------------------
 
+    async def _read_auth_message(self, ws: web.WebSocketResponse) -> dict[str, object] | None:
+        """Read and validate the initial auth message. Returns parsed data or None."""
+        try:
+            raw = await asyncio.wait_for(ws.receive(), timeout=10.0)
+        except (TimeoutError, asyncio.CancelledError):
+            await _ws_reject(ws, "auth_timeout", "No auth message within 10 s")
+            return None
+
+        if raw.type != WSMsgType.TEXT:
+            await _ws_reject(ws, "auth_required", "First message must be JSON text")
+            return None
+
+        try:
+            data = json.loads(raw.data)
+        except (json.JSONDecodeError, ValueError):
+            data = None
+        if not isinstance(data, dict) or data.get("type") != "auth":
+            await _ws_reject(ws, "auth_required", "First message must be auth JSON")
+            return None
+
+        return data
+
     async def _authenticate(
         self,
         ws: web.WebSocketResponse,
     ) -> tuple[int, E2ESession] | None:
         """Wait for auth + E2E key exchange.  Returns (chat_id, e2e) or None."""
-        try:
-            raw = await asyncio.wait_for(ws.receive(), timeout=10.0)
-        except (TimeoutError, asyncio.CancelledError):
-            await _ws_send(
-                ws,
-                {
-                    "type": "error",
-                    "code": "auth_timeout",
-                    "message": "No auth message within 10 s",
-                },
-            )
-            await ws.close()
-            return None
-
-        if raw.type != WSMsgType.TEXT:
-            await _ws_send(
-                ws,
-                {
-                    "type": "error",
-                    "code": "auth_required",
-                    "message": "First message must be JSON text",
-                },
-            )
-            await ws.close()
-            return None
-
-        try:
-            data = json.loads(raw.data)
-            if data.get("type") != "auth":
-                raise ValueError  # noqa: TRY301
-        except (json.JSONDecodeError, ValueError):
-            await _ws_send(
-                ws,
-                {
-                    "type": "error",
-                    "code": "auth_required",
-                    "message": "First message must be auth JSON",
-                },
-            )
-            await ws.close()
+        data = await self._read_auth_message(ws)
+        if data is None:
             return None
 
         token = str(data.get("token", ""))
         if not hmac.compare_digest(token, self._config.token):
             logger.warning("API auth failed (invalid token)")
-            await _ws_send(
-                ws,
-                {
-                    "type": "error",
-                    "code": "auth_failed",
-                    "message": "Invalid token",
-                },
-            )
-            await ws.close()
+            await _ws_reject(ws, "auth_failed", "Invalid token")
             return None
 
         # E2E key exchange (mandatory)
         e2e = E2ESession()
         e2e_pk = data.get("e2e_pk")
-        try:
-            if not isinstance(e2e_pk, str) or not e2e_pk:
-                msg = "e2e_pk required"
-                raise ValueError(msg)  # noqa: TRY301
-            e2e.set_remote_key(e2e_pk)
-        except Exception:
-            await _ws_send(
-                ws,
-                {
-                    "type": "error",
-                    "code": "auth_failed",
-                    "message": "e2e_pk required or invalid",
-                },
-            )
-            await ws.close()
+        e2e_valid = isinstance(e2e_pk, str) and bool(e2e_pk)
+        if e2e_valid:
+            try:
+                e2e.set_remote_key(e2e_pk)
+            except Exception:
+                e2e_valid = False
+        if not e2e_valid:
+            await _ws_reject(ws, "auth_failed", "e2e_pk required or invalid")
             return None
 
         chat_id = data.get("chat_id", self._default_chat_id)

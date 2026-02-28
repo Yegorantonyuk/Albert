@@ -26,7 +26,7 @@ Bot-level handlers (`app.py`):
 
 Orchestrator-routed commands:
 
-- `/status`, `/memory`, `/model`, `/cron`, `/diagnose`, `/upgrade`
+- `/status`, `/memory`, `/model`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`
 
 ## Middleware behavior
 

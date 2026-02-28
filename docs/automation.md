@@ -61,8 +61,9 @@ Runtime behavior:
 4. resolve task overrides (`provider/model/reasoning/cli_parameters`)
 5. build provider command (`claude`, `codex`, or `gemini`)
 6. execute with timeout (`cli_timeout`)
-7. parse output and persist status
+7. parse output
 8. send result callback to Telegram
+9. persist status (`last_run_status`, `last_run_at`)
 
 Per-job override fields in `cron_jobs.json`:
 
@@ -83,6 +84,7 @@ Notes:
 - `reasoning_effort` is only used for Codex models that support it.
 - task `cli_parameters` are task-level only (no merge with global provider args).
 - cron status includes `error:cli_not_found_<provider>` for missing provider binaries.
+- quiet-hour skips do not emit result callbacks and do not update `last_run_status`.
 
 ## Webhooks
 
@@ -148,6 +150,12 @@ Observer behavior:
 Default ACK token: `HEARTBEAT_OK`.
 
 Default prompt asks the model to review memory + cron context and either send something useful or respond exactly with `HEARTBEAT_OK`.
+
+Lifecycle note:
+
+- heartbeat/cleanup config values hot-reload
+- observer start/stop does not hot-toggle
+- if disabled at startup, changing `enabled` to `true` requires restart
 
 ## Cleanup
 

@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Send a message to another agent via the InterAgentBus.
+"""Send a synchronous message to another agent via the InterAgentBus.
+
+Blocks until the sub-agent responds. The response is returned as stdout
+to the calling CLI process (your tool output).
+
+The response ALWAYS comes back to YOU (the calling agent). There is no way
+to make the sub-agent reply in its own Telegram chat via this tool.
 
 Uses the internal localhost HTTP API to communicate with the bus.
-Environment variables DUCTOR_AGENT_NAME and DUCTOR_INTERAGENT_PORT
-are automatically set by the Ductor framework.
+Environment variables DUCTOR_AGENT_NAME, DUCTOR_INTERAGENT_PORT, and
+DUCTOR_INTERAGENT_HOST are automatically set by the Ductor framework.
 
 Usage:
     python3 ask_agent.py TARGET_AGENT "Your message here"
@@ -20,15 +26,16 @@ import urllib.error
 
 def main() -> None:
     if len(sys.argv) < 3:
-        print("Usage: python3 ask_agent.py TARGET_AGENT \"message\"", file=sys.stderr)
+        print('Usage: python3 ask_agent.py TARGET_AGENT "message"', file=sys.stderr)
         sys.exit(1)
 
     target = sys.argv[1]
     message = sys.argv[2]
     port = os.environ.get("DUCTOR_INTERAGENT_PORT", "8799")
+    host = os.environ.get("DUCTOR_INTERAGENT_HOST", "127.0.0.1")
     sender = os.environ.get("DUCTOR_AGENT_NAME", "unknown")
 
-    url = f"http://127.0.0.1:{port}/interagent/send"
+    url = f"http://{host}:{port}/interagent/send"
     payload = json.dumps({"from": sender, "to": target, "message": message}).encode()
 
     req = urllib.request.Request(
@@ -43,7 +50,9 @@ def main() -> None:
             result = json.loads(resp.read().decode())
     except urllib.error.URLError as e:
         print(f"Error: Cannot reach inter-agent API at {url}: {e}", file=sys.stderr)
-        print("Make sure the Ductor supervisor is running with multi-agent support.", file=sys.stderr)
+        print(
+            "Make sure the Ductor supervisor is running with multi-agent support.", file=sys.stderr
+        )
         sys.exit(1)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

@@ -131,5 +131,6 @@ If rules/skills drift:
   - `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`
   - `workspace/tools/cron_tools/*.py`
   - `workspace/tools/webhook_tools/*.py`
+  - `workspace/tools/agent_tools/*.py`
 
 Continue with `docs/architecture.md` and `docs/modules/*.md` for subsystem details.

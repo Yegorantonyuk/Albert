@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,6 +29,40 @@ def _find_markers(text: str) -> tuple[str, str] | None:
     if _LEGACY_START in text:
         return _LEGACY_START, _LEGACY_END
     return None
+
+
+def _sync_agent_io(shared_path: Path, mainmemory_path: Path) -> bool:
+    """Synchronous file I/O for injecting shared knowledge into one agent.
+
+    Returns True if the file was written.
+    """
+    if not shared_path.is_file():
+        return False
+    shared_content = shared_path.read_text(encoding="utf-8").strip()
+    if not shared_content:
+        return False
+    inject_block = f"{_START_MARKER}\n{shared_content}\n{_END_MARKER}"
+
+    if not mainmemory_path.is_file():
+        return False
+
+    current = mainmemory_path.read_text(encoding="utf-8")
+
+    markers = _find_markers(current)
+    if markers:
+        start, end = markers
+        before = current.split(start, 1)[0]
+        after_parts = current.split(end, 1)
+        after = after_parts[1] if len(after_parts) > 1 else ""
+        # Always write new-format markers (migrates legacy on first sync)
+        new_content = f"{before}{inject_block}{after}"
+    else:
+        new_content = f"{current.rstrip()}\n\n{inject_block}\n"
+
+    if new_content != current:
+        mainmemory_path.write_text(new_content, encoding="utf-8")
+        return True
+    return False
 
 
 class SharedKnowledgeSync:
@@ -67,7 +102,7 @@ class SharedKnowledgeSync:
                 encoding="utf-8",
             )
             logger.info("Created seed SHAREDMEMORY.md at %s", self._path)
-        self._sync_all()
+        await self._sync_all()
         await self._watcher.start()
         logger.info("SharedKnowledgeSync watching %s", self._path)
 
@@ -77,42 +112,18 @@ class SharedKnowledgeSync:
     async def _on_changed(self) -> None:
         """FileWatcher callback — SHAREDMEMORY.md was modified."""
         logger.info("SHAREDMEMORY.md changed, syncing to all agents")
-        self._sync_all()
+        await self._sync_all()
 
-    def sync_agent(self, mainmemory_path: Path) -> None:
+    async def sync_agent(self, mainmemory_path: Path) -> None:
         """Inject shared knowledge into a single agent's MAINMEMORY.md."""
-        if not self._path.is_file():
-            return
-        shared_content = self._path.read_text(encoding="utf-8").strip()
-        if not shared_content:
-            return
-        inject_block = f"{_START_MARKER}\n{shared_content}\n{_END_MARKER}"
-
-        if not mainmemory_path.is_file():
-            logger.debug("Skipping %s (file does not exist)", mainmemory_path)
-            return
-
-        current = mainmemory_path.read_text(encoding="utf-8")
-
-        markers = _find_markers(current)
-        if markers:
-            start, end = markers
-            before = current.split(start, 1)[0]
-            after_parts = current.split(end, 1)
-            after = after_parts[1] if len(after_parts) > 1 else ""
-            # Always write new-format markers (migrates legacy on first sync)
-            new_content = f"{before}{inject_block}{after}"
-        else:
-            new_content = f"{current.rstrip()}\n\n{inject_block}\n"
-
-        if new_content != current:
-            mainmemory_path.write_text(new_content, encoding="utf-8")
+        written = await asyncio.to_thread(_sync_agent_io, self._path, mainmemory_path)
+        if written:
             logger.info("Synced shared knowledge to %s", mainmemory_path)
 
-    def _sync_all(self) -> None:
+    async def _sync_all(self) -> None:
         """Inject into all registered agents' MAINMEMORY.md files."""
         for name, stack in self._supervisor.stacks.items():
             try:
-                self.sync_agent(stack.paths.mainmemory_path)
+                await self.sync_agent(stack.paths.mainmemory_path)
             except Exception:
                 logger.exception("Failed to sync shared knowledge to agent '%s'", name)

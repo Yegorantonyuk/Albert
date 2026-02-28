@@ -7,7 +7,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-from ductor_bot.config import AgentConfig
+from ductor_bot.config import AgentConfig, update_config_file_async
 from ductor_bot.infra.file_watcher import FileWatcher
 from ductor_bot.infra.restart import EXIT_RESTART
 from ductor_bot.multiagent.health import AgentHealth
@@ -46,6 +46,7 @@ class AgentSupervisor:
         self._watcher = FileWatcher(self._agents_path, self._on_agents_changed)
         self._running = False
         self._main_done: asyncio.Event = asyncio.Event()
+        self._agents_lock = asyncio.Lock()
 
         # Bus, internal API, and shared knowledge — created lazily in start()
         self._bus: InterAgentBus | None = None
@@ -80,12 +81,14 @@ class AgentSupervisor:
 
         # 1. Start main agent
         main_stack = await AgentStack.create(
-            "main", self._main_config, is_main=True,
+            "main",
+            self._main_config,
+            is_main=True,
         )
         self._stacks["main"] = main_stack
         self._health["main"] = AgentHealth(name="main")
         self._bus.register("main", main_stack)
-        self._bus.set_async_result_handler("main", main_stack.bot._on_async_interagent_result)
+        self._bus.set_async_result_handler("main", main_stack.bot.on_async_interagent_result)
 
         self._tasks["main"] = asyncio.create_task(
             self._supervised_run("main", main_stack),
@@ -117,6 +120,84 @@ class AgentSupervisor:
 
         return exit_code
 
+    def _finish_agent(self, name: str, health: AgentHealth) -> None:
+        """Mark an agent as stopped and signal main-done if it is the main agent."""
+        health.mark_stopped()
+        if name == "main":
+            self._main_done.set()
+
+    async def _handle_restart_exit(
+        self, name: str, stack: AgentStack, health: AgentHealth
+    ) -> tuple[AgentStack, bool]:
+        """Handle EXIT_RESTART for an agent.
+
+        Returns ``(stack, should_return)`` — when *should_return* is True the
+        caller must ``return EXIT_RESTART``.
+        """
+        if name == "main":
+            logger.info("Main agent requested full service restart")
+            self._finish_agent(name, health)
+            return stack, True
+
+        # Sub-agent: in-process hot-reload (rebuild stack only)
+        logger.info("Sub-agent '%s' requested restart (hot-reload)", name)
+        health.mark_starting()
+        await stack.shutdown()
+        new_stack = await self._rebuild_stack(name, stack)
+        return new_stack, False
+
+    async def _handle_crash(
+        self,
+        name: str,
+        stack: AgentStack,
+        health: AgentHealth,
+        retry_count: int,
+        error_msg: str,
+    ) -> tuple[AgentStack, int, bool]:
+        """Handle a crash in ``_supervised_run``.
+
+        Returns ``(stack, retry_count, should_return)`` — when *should_return*
+        is True the caller must ``return 1``.
+        """
+        health.mark_crashed(error_msg)
+        logger.exception(
+            "Agent '%s' crashed (attempt %d/%d): %s",
+            name,
+            retry_count,
+            _MAX_RESTART_RETRIES,
+            error_msg,
+        )
+
+        if name == "main":
+            logger.exception("Main agent crashed, terminating supervisor")
+            self._main_done.set()
+            return stack, retry_count, True
+
+        if retry_count > _MAX_RESTART_RETRIES:
+            logger.exception(
+                "Agent '%s' exceeded max retries (%d), giving up",
+                name,
+                _MAX_RESTART_RETRIES,
+            )
+            await self._notify_main_agent(
+                f"Sub-agent '{name}' stopped after {_MAX_RESTART_RETRIES} crashes: {error_msg}"
+            )
+            return stack, retry_count, True
+
+        wait = _RESTART_BACKOFF_BASE * (2 ** (retry_count - 1))
+        logger.info("Agent '%s' restarting in %ds", name, wait)
+        await asyncio.sleep(wait)
+
+        try:
+            with contextlib.suppress(Exception):
+                await stack.shutdown()
+            stack = await self._rebuild_stack(name, stack)
+            health.mark_starting()
+        except Exception:
+            logger.exception("Failed to rebuild agent '%s'", name)
+
+        return stack, retry_count, False
+
     async def _supervised_run(self, name: str, stack: AgentStack) -> int:
         """Run an agent with automatic crash recovery.
 
@@ -136,37 +217,21 @@ class AgentSupervisor:
 
         while self._running:
             try:
-                # Register a post-startup hook to inject supervisor reference
-                # into the orchestrator (which is created during _on_startup).
                 self._inject_supervisor_hook(stack)
-
                 health.mark_running()
                 logger.info("Agent '%s' running", name)
                 exit_code = await stack.run()
 
                 if exit_code == EXIT_RESTART:
-                    if name == "main":
-                        # Main agent: propagate EXIT_RESTART so the process
-                        # re-execs, picking up code/config/dependency changes.
-                        logger.info("Main agent requested full service restart")
-                        health.mark_stopped()
-                        self._main_done.set()
+                    stack, should_return = await self._handle_restart_exit(name, stack, health)
+                    if should_return:
                         return EXIT_RESTART
-
-                    # Sub-agent: in-process hot-reload (rebuild stack only)
-                    logger.info("Sub-agent '%s' requested restart (hot-reload)", name)
-                    health.mark_starting()
-                    await stack.shutdown()
-                    stack = await self._rebuild_stack(name, stack)
                     retry_count = 0
                     continue
 
                 # Clean exit
                 logger.info("Agent '%s' exited cleanly (code=%d)", name, exit_code)
-                health.mark_stopped()
-                if name == "main":
-                    self._main_done.set()
-                return exit_code
+                self._finish_agent(name, health)
 
             except asyncio.CancelledError:
                 logger.info("Agent '%s' cancelled", name)
@@ -176,45 +241,21 @@ class AgentSupervisor:
             except Exception as exc:
                 retry_count += 1
                 error_msg = f"{type(exc).__name__}: {exc}"
-                health.mark_crashed(error_msg)
-                logger.error(
-                    "Agent '%s' crashed (attempt %d/%d): %s",
-                    name, retry_count, _MAX_RESTART_RETRIES, error_msg,
-                    exc_info=True,
+                stack, retry_count, should_return = await self._handle_crash(
+                    name,
+                    stack,
+                    health,
+                    retry_count,
+                    error_msg,
                 )
-
-                if name == "main":
-                    # Main agent crash is fatal — exit the process
-                    logger.error("Main agent crashed, terminating supervisor")
-                    self._main_done.set()
+                if should_return:
                     return 1
+                continue
 
-                if retry_count > _MAX_RESTART_RETRIES:
-                    logger.error(
-                        "Agent '%s' exceeded max retries (%d), giving up",
-                        name, _MAX_RESTART_RETRIES,
-                    )
-                    await self._notify_main_agent(
-                        f"Sub-agent '{name}' stopped after {_MAX_RESTART_RETRIES} crashes: {error_msg}"
-                    )
-                    return 1
+            else:
+                return exit_code
 
-                wait = _RESTART_BACKOFF_BASE * (2 ** (retry_count - 1))
-                logger.info("Agent '%s' restarting in %ds", name, wait)
-                await asyncio.sleep(wait)
-
-                try:
-                    with contextlib.suppress(Exception):
-                        await stack.shutdown()
-                    stack = await self._rebuild_stack(name, stack)
-                    health.mark_starting()
-                except Exception:
-                    logger.exception("Failed to rebuild agent '%s'", name)
-                    continue
-
-        health.mark_stopped()
-        if name == "main":
-            self._main_done.set()
+        self._finish_agent(name, health)
         return 0
 
     def _inject_supervisor_hook(self, stack: AgentStack) -> None:
@@ -227,7 +268,7 @@ class AgentSupervisor:
         supervisor = self
 
         async def _post_startup() -> None:
-            orch = stack.bot._orchestrator
+            orch = stack.bot.orchestrator
             if orch is None:
                 return
             orch._supervisor = supervisor
@@ -237,17 +278,19 @@ class AgentSupervisor:
 
         # aiogram runs startup handlers in registration order;
         # TelegramBot registers _on_startup in __init__, so ours runs after.
-        stack.bot._dp.startup.register(_post_startup)
+        stack.bot.dispatcher.startup.register(_post_startup)
 
     async def _rebuild_stack(self, name: str, old_stack: AgentStack) -> AgentStack:
         """Rebuild an AgentStack from its config."""
         new_stack = await AgentStack.create(
-            name, old_stack.config, is_main=old_stack.is_main,
+            name,
+            old_stack.config,
+            is_main=old_stack.is_main,
         )
         self._stacks[name] = new_stack
         if self._bus:
             self._bus.register(name, new_stack)
-            self._bus.set_async_result_handler(name, new_stack.bot._on_async_interagent_result)
+            self._bus.set_async_result_handler(name, new_stack.bot.on_async_interagent_result)
         return new_stack
 
     # -- Sub-agent lifecycle ------------------------------------------------
@@ -275,11 +318,22 @@ class AgentSupervisor:
             logger.exception("Failed to create sub-agent '%s'", name)
             return
 
+        # Workspace init creates config.json from config.example (main defaults).
+        # Overwrite model/provider/effort so the on-disk config matches agents.json.
+        config_path = agent_home / "config" / "config.json"
+        if config_path.exists():
+            await update_config_file_async(
+                config_path,
+                provider=config.provider,
+                model=config.model,
+                reasoning_effort=config.reasoning_effort,
+            )
+
         self._stacks[name] = stack
         self._health[name] = AgentHealth(name=name)
         if self._bus:
             self._bus.register(name, stack)
-            self._bus.set_async_result_handler(name, stack.bot._on_async_interagent_result)
+            self._bus.set_async_result_handler(name, stack.bot.on_async_interagent_result)
 
         self._tasks[name] = asyncio.create_task(
             self._supervised_run(name, stack),
@@ -288,7 +342,7 @@ class AgentSupervisor:
 
         # Sync shared knowledge into the new agent's MAINMEMORY.md
         if self._shared_knowledge:
-            self._shared_knowledge.sync_agent(stack.paths.mainmemory_path)
+            await self._shared_knowledge.sync_agent(stack.paths.mainmemory_path)
 
         logger.info("Sub-agent '%s' started (home=%s)", name, agent_home)
 
@@ -351,34 +405,35 @@ class AgentSupervisor:
 
     async def _on_agents_changed(self) -> None:
         """Called when agents.json mtime changes. Sync running agents."""
-        desired = {a.name: a for a in self._registry.load()}
-        current_sub = set(self._stacks.keys()) - {"main"}
-        desired_names = set(desired.keys())
+        async with self._agents_lock:
+            desired = {a.name: a for a in self._registry.load()}
+            current_sub = set(self._stacks.keys()) - {"main"}
+            desired_names = set(desired.keys())
 
-        # Start new agents
-        for name in desired_names - current_sub:
-            logger.info("agents.json: new agent '%s' detected, starting", name)
-            await self._start_sub_agent(desired[name])
+            # Start new agents
+            for name in desired_names - current_sub:
+                logger.info("agents.json: new agent '%s' detected, starting", name)
+                await self._start_sub_agent(desired[name])
 
-        # Stop removed agents
-        for name in current_sub - desired_names:
-            logger.info("agents.json: agent '%s' removed, stopping", name)
-            await self.stop_agent(name)
-
-        # Check for config changes on existing agents
-        for name in desired_names & current_sub:
-            sub_cfg = desired[name]
-            existing = self._stacks.get(name)
-            if existing is None:
-                continue
-
-            # Rebuild config and compare token (cheapest change detection)
-            agent_home = self._main_paths.ductor_home / "agents" / name
-            new_config = merge_sub_agent_config(self._main_config, sub_cfg, agent_home)
-            if new_config.telegram_token != existing.config.telegram_token:
-                logger.info("agents.json: agent '%s' token changed, restarting", name)
+            # Stop removed agents
+            for name in current_sub - desired_names:
+                logger.info("agents.json: agent '%s' removed, stopping", name)
                 await self.stop_agent(name)
-                await self._start_sub_agent(sub_cfg)
+
+            # Check for config changes on existing agents
+            for name in desired_names & current_sub:
+                sub_cfg = desired[name]
+                existing = self._stacks.get(name)
+                if existing is None:
+                    continue
+
+                # Rebuild config and compare token (cheapest change detection)
+                agent_home = self._main_paths.ductor_home / "agents" / name
+                new_config = merge_sub_agent_config(self._main_config, sub_cfg, agent_home)
+                if new_config.telegram_token != existing.config.telegram_token:
+                    logger.info("agents.json: agent '%s' token changed, restarting", name)
+                    await self.stop_agent(name)
+                    await self._start_sub_agent(sub_cfg)
 
     # -- Notifications ------------------------------------------------------
 
@@ -391,7 +446,7 @@ class AgentSupervisor:
             from ductor_bot.bot.sender import send_rich
 
             for uid in main.config.allowed_user_ids:
-                await send_rich(main.bot._bot, uid, f"**[Supervisor]** {message}")
+                await send_rich(main.bot.bot_instance, uid, f"**[Supervisor]** {message}")
         except Exception:
             logger.exception("Failed to notify main agent")
 

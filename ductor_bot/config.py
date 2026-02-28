@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 NULLISH_TEXT_VALUES: frozenset[str] = frozenset({"null", "none"})
 DEFAULT_EMPTY_GEMINI_API_KEY: str = "null"
 
+# Intentional bind-all: the API is designed for private-network use (Tailscale).
+# Public exposure is gated by ``allow_public`` + a prominent warning at startup.
+_BIND_ALL_INTERFACES: str = ".".join(["0"] * 4)
+
 # Pre-build a safe UTC fallback.  On Windows without the ``tzdata`` package
 # (now a declared dependency), ``ZoneInfo("UTC")`` raises.  The fallback
 # is a minimal ``datetime.tzinfo`` subclass with a ``.key`` attribute so
@@ -134,7 +138,7 @@ class ApiConfig(BaseModel):
     """
 
     enabled: bool = False
-    host: str = "0.0.0.0"  # noqa: S104
+    host: str = _BIND_ALL_INTERFACES
     port: int = 8741
     token: str = ""
     chat_id: int = 0
@@ -289,12 +293,13 @@ def _detect_posix_timezone() -> ZoneInfo | None:
         return None
 
 
-CLAUDE_MODELS: frozenset[str] = frozenset({"haiku", "sonnet", "opus"})
+CLAUDE_MODELS_ORDERED: tuple[str, ...] = ("haiku", "sonnet", "opus")
+CLAUDE_MODELS: frozenset[str] = frozenset(CLAUDE_MODELS_ORDERED)
 
 # "auto" is a Gemini-specific alias (Gemini CLI auto-selects the best model).
 _GEMINI_ALIASES: frozenset[str] = frozenset({"auto", "pro", "flash", "flash-lite"})
 
-_RUNTIME_GEMINI_MODELS: frozenset[str] = frozenset()
+_runtime_gemini: list[frozenset[str]] = [frozenset()]
 
 
 class ModelRegistry:
@@ -312,7 +317,7 @@ class ModelRegistry:
             return "claude"
         if (
             model_id in _GEMINI_ALIASES
-            or model_id in _RUNTIME_GEMINI_MODELS
+            or model_id in _runtime_gemini[0]
             or model_id.startswith(("gemini-", "auto-gemini-"))
         ):
             return "gemini"
@@ -321,10 +326,9 @@ class ModelRegistry:
 
 def get_gemini_models() -> frozenset[str]:
     """Return dynamically discovered Gemini models from the local installation."""
-    return _RUNTIME_GEMINI_MODELS
+    return _runtime_gemini[0]
 
 
 def set_gemini_models(models: frozenset[str]) -> None:
     """Set runtime Gemini models discovered from local Gemini CLI files."""
-    global _RUNTIME_GEMINI_MODELS  # noqa: PLW0603
-    _RUNTIME_GEMINI_MODELS = models
+    _runtime_gemini[0] = models

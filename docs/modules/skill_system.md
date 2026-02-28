@@ -55,7 +55,7 @@ In link mode, existing symlinks pointing outside sync roots are treated as user-
 
 ## Cleanup on shutdown
 
-`cleanup_ductor_links(paths)` removes only ductor-managed symlinks from CLI skill dirs.
+`cleanup_ductor_links(paths)` removes symlinks in CLI skill dirs whose resolved targets are under managed roots.
 
 Managed roots:
 
@@ -70,7 +70,8 @@ User-managed links/directories are preserved.
 
 ## Safety guarantees
 
-- real directories are never deleted/overwritten
+- unmanaged real directories are not overwritten
+- managed Docker-copy directories (`.ductor_managed`) may be replaced on source changes
 - broken symlinks are cleaned
 - hidden/internal directories are skipped (`.system`, `.claude`, `.git`, `.venv`, etc.)
 - sync logic is cross-platform (Windows junction fallback)

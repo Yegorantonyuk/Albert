@@ -167,13 +167,13 @@ Manual config equivalent:
 
 Notes:
 
-- token is auto-generated and persisted on first API start when empty.
+- token is generated and persisted by `ductor api enable` (runtime also generates it on API start if still empty).
 - endpoints:
   - WebSocket: `ws://<host>:8741/ws`
   - health: `GET /health`
   - file download: `GET /files?path=...` (Bearer token)
   - file upload: `POST /upload` (Bearer token, multipart)
-- default API session uses `api.chat_id` when `>0`, else first `allowed_user_ids` entry (fallback `1`); clients can override `chat_id` in auth payload.
+- default API session uses `api.chat_id` by truthiness (`0` falls back), else first `allowed_user_ids` entry (fallback `1`); clients can override `chat_id` in auth payload.
 - recommended deployment is a private network (for example Tailscale).
 
 ## Background service
@@ -199,6 +199,10 @@ Backends:
 - Linux: `systemd --user` service `~/.config/systemd/user/ductor.service`
 - macOS: Launch Agent `~/Library/LaunchAgents/dev.ductor.plist`
 - Windows: Task Scheduler task `ductor`
+
+Linux note:
+
+- user services survive logout/start on boot only when user linger is enabled (`sudo loginctl enable-linger <user>`). Installer attempts this and prints a hint when it cannot set linger.
 
 Windows note:
 

@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ductor_bot.config import (
     AgentConfig,
     ApiConfig,
-    CLIParametersConfig,
     CleanupConfig,
+    CLIParametersConfig,
     DockerConfig,
     HeartbeatConfig,
     StreamingConfig,
     WebhookConfig,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class SubAgentConfig(BaseModel):
@@ -30,7 +27,7 @@ class SubAgentConfig(BaseModel):
 
     name: str
     telegram_token: str
-    allowed_user_ids: list[int] = Field(default_factory=list)
+    allowed_user_ids: list[int] | None = None
 
     # Optional overrides — inherit from main agent if None
     provider: str | None = None
@@ -64,14 +61,25 @@ def merge_sub_agent_config(
 ) -> AgentConfig:
     """Create a full AgentConfig by merging main config with sub-agent overrides.
 
-    Sub-agent fields that are ``None`` inherit the main agent value.
-    ``ductor_home`` is always set to *agent_home* and ``telegram_token`` /
-    ``allowed_user_ids`` always come from the sub-agent definition.
+    Merge: main agent defaults → ``agents.json`` explicit overrides (non-None).
+
+    ``switch_model()`` keeps ``agents.json`` up-to-date when the user changes
+    model/provider/reasoning_effort in a sub-agent chat, so no extra config
+    layer is needed.
     """
     base = main.model_dump()
+
+    # agents.json explicit overrides (non-None fields win)
     overrides = sub.model_dump(exclude_none=True, exclude={"name"})
     base.update(overrides)
+
     base["ductor_home"] = str(agent_home)
     base["telegram_token"] = sub.telegram_token
-    base["allowed_user_ids"] = sub.allowed_user_ids
+    base["allowed_user_ids"] = sub.allowed_user_ids or []
+
+    # Sub-agents don't need the user-facing API server (they use InterAgentBus).
+    # Disable it unless the sub-agent explicitly provides an api config.
+    if sub.api is None:
+        base.setdefault("api", {})["enabled"] = False
+
     return AgentConfig(**base)

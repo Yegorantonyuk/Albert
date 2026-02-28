@@ -57,6 +57,7 @@ from ductor_bot.orchestrator.commands import (
 )
 from ductor_bot.orchestrator.directives import parse_directives
 from ductor_bot.orchestrator.flows import (
+    StreamingCallbacks,
     heartbeat_flow,
     named_session_flow,
     named_session_streaming,
@@ -85,12 +86,23 @@ from ductor_bot.workspace.skill_sync import (
 
 if TYPE_CHECKING:
     from ductor_bot.cli.auth import AuthResult, AuthStatus
+    from ductor_bot.multiagent.supervisor import AgentSupervisor
 
 logger = logging.getLogger(__name__)
 
 
 _TextCallback = Callable[[str], Awaitable[None]]
 _SystemStatusCallback = Callable[[str | None], Awaitable[None]]
+
+
+@dataclass(slots=True)
+class NamedSessionRequest:
+    """Parameters for submitting a named background session."""
+
+    message_id: int
+    thread_id: int | None
+    provider_override: str | None = None
+    model_override: str | None = None
 
 
 @dataclass(slots=True)
@@ -104,6 +116,14 @@ class _MessageDispatch:
     on_text_delta: _TextCallback | None = None
     on_tool_activity: _TextCallback | None = None
     on_system_status: _SystemStatusCallback | None = None
+
+    def streaming_callbacks(self) -> StreamingCallbacks:
+        """Bundle the streaming callbacks into a StreamingCallbacks instance."""
+        return StreamingCallbacks(
+            on_text_delta=self.on_text_delta,
+            on_tool_activity=self.on_tool_activity,
+            on_system_status=self.on_system_status,
+        )
 
 
 def _docker_skill_resync(paths: DuctorPaths) -> None:
@@ -177,7 +197,7 @@ class Orchestrator:
         self._gemini_api_key_mode: bool | None = None
         self._hook_registry = MessageHookRegistry()
         self._hook_registry.register(MAINMEMORY_REMINDER)
-        self._supervisor: object | None = None  # Set by AgentSupervisor after creation
+        self._supervisor: AgentSupervisor | None = None  # Set by AgentSupervisor after creation
         self._command_registry = CommandRegistry()
         self._register_commands()
         self._config_reloader: ConfigReloader | None = None
@@ -189,7 +209,10 @@ class Orchestrator:
 
     @classmethod
     async def create(
-        cls, config: AgentConfig, *, agent_name: str = "main",
+        cls,
+        config: AgentConfig,
+        *,
+        agent_name: str = "main",
     ) -> Orchestrator:
         """Async factory: build Orchestrator.
 
@@ -457,9 +480,7 @@ class Orchestrator:
                         dispatch.chat_id,
                         first_key,
                         session_prompt,
-                        on_text_delta=dispatch.on_text_delta,
-                        on_tool_activity=dispatch.on_tool_activity,
-                        on_system_status=dispatch.on_system_status,
+                        cbs=dispatch.streaming_callbacks(),
                     )
                 return await named_session_flow(self, dispatch.chat_id, first_key, session_prompt)
 
@@ -477,9 +498,7 @@ class Orchestrator:
                 dispatch.chat_id,
                 prompt_text,
                 model_override=directives.model,
-                on_text_delta=dispatch.on_text_delta,
-                on_tool_activity=dispatch.on_tool_activity,
-                on_system_status=dispatch.on_system_status,
+                cbs=dispatch.streaming_callbacks(),
             )
 
         return await normal(
@@ -623,15 +642,11 @@ class Orchestrator:
         )
         return self._bg_observer.submit(sub, exec_config)
 
-    def submit_named_session(  # noqa: PLR0913
+    def submit_named_session(
         self,
         chat_id: int,
         prompt: str,
-        *,
-        message_id: int,
-        thread_id: int | None,
-        provider_override: str | None = None,
-        model_override: str | None = None,
+        request: NamedSessionRequest,
     ) -> tuple[str, str]:
         """Submit a new named background session. Returns (task_id, session_name)."""
         from ductor_bot.cli.param_resolver import resolve_cli_config
@@ -641,17 +656,19 @@ class Orchestrator:
             raise RuntimeError(msg)
 
         model_name, provider_name = self.resolve_runtime_target(self._config.model)
-        if provider_override:
-            provider_name = provider_override
-            model_name = model_override or self.default_model_for_provider(provider_override)
+        if request.provider_override:
+            provider_name = request.provider_override
+            model_name = request.model_override or self.default_model_for_provider(
+                request.provider_override
+            )
 
         ns = self._named_sessions.create(chat_id, provider_name, model_name, prompt)
         exec_config = resolve_cli_config(self._config, self._codex_cache)
         sub = BackgroundSubmit(
             chat_id=chat_id,
             prompt=prompt,
-            message_id=message_id,
-            thread_id=thread_id,
+            message_id=request.message_id,
+            thread_id=request.thread_id,
             session_name=ns.name,
             provider_override=provider_name,
             model_override=model_name,
@@ -917,10 +934,11 @@ class Orchestrator:
 
         try:
             response = await self._cli_service.execute(request)
-            return response.result if response else ""
         except Exception:
             logger.exception("Inter-agent message handling failed (from=%s)", sender)
             return f"Error processing inter-agent message from '{sender}'"
+        else:
+            return response.result if response else ""
 
     async def handle_async_interagent_result(
         self,
@@ -960,12 +978,14 @@ class Orchestrator:
 
         try:
             response = await self._cli_service.execute(request)
-            return response.result if response else ""
         except Exception:
             logger.exception(
-                "Async inter-agent result handling failed (from=%s)", recipient,
+                "Async inter-agent result handling failed (from=%s)",
+                recipient,
             )
             return f"Error processing async result from '{recipient}'"
+        else:
+            return response.result if response else ""
 
     async def shutdown(self) -> None:
         """Cleanup on bot shutdown."""

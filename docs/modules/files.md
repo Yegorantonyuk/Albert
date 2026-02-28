@@ -27,13 +27,14 @@ Maps config `file_access` to allowed path roots:
 - `all` -> `None` (unrestricted)
 - `home` -> `[Path.home()]`
 - `workspace` -> `[workspace]`
-- unknown value -> `None`
+- unknown value -> `[workspace]` (restrictive fallback, warning logged)
 
 Used by Telegram send path and API `GET /files` path checks.
 
 ### `storage.sanitize_filename(name)`
 
 - removes `/`, `\`, and null bytes
+- removes Windows-illegal characters `< > : \" | ? *`
 - collapses repeated underscores
 - strips edge punctuation/space
 - truncates to 120 chars

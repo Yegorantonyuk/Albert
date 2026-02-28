@@ -19,10 +19,6 @@ Runtime infrastructure: process lifecycle, restart/update flow, Docker sandbox, 
 - `version.py`: PyPI version/changelog utilities
 - `updater.py`: `UpdateObserver`, upgrade helpers/sentinel
 
-Related runtime wrapper:
-
-- `ductor_bot/run.py` (documented in [supervisor.md](supervisor.md)): optional supervisor with restart/backoff + hot-reload
-
 ## Service management
 
 `service.py` dispatches by platform:
@@ -93,7 +89,7 @@ Windows compatibility includes broader `OSError` handling around PID liveness/te
 
 1. stop installed background service (prevents immediate respawn)
 2. kill PID-file instance
-3. kill remaining ductor processes (`kill_all_ductor_processes`)
+3. on Windows only: kill remaining ductor processes (`kill_all_ductor_processes`)
 4. short Windows wait for lock release
 5. stop Docker container when enabled
 
@@ -138,7 +134,7 @@ The `Dockerfile.sandbox` includes Chrome/Chromium runtime dependencies (libgbm, 
 | `ductor docker unmount <path>` | Remove configured mount (exact/resolved/basename match) |
 | `ductor docker mounts` | List configured mounts with resolved container targets and status |
 
-`ductor docker rebuild` is safe to run while the bot runs as a service -- it stops the bot process first, the active service backend (systemd/launchd/Task Scheduler) can restart it, and the image is rebuilt during startup.
+`ductor docker rebuild` calls `_stop_bot()` first, which also stops a running installed service. Rebuild does not explicitly start the service again.
 
 Mount-management commands update `config.json` only. Restart (or rebuild) is required for new `docker run -v ...` flags to take effect.
 
@@ -152,4 +148,4 @@ Mount-management commands update `config.json` only. Restart (or rebuild) is req
 
 ## Supervisor
 
-See [supervisor.md](supervisor.md) for the optional wrapper process (`ductor_bot/run.py`).
+See [supervisor.md](supervisor.md) for the in-process multi-agent supervisor (`ductor_bot/multiagent/supervisor.py`).

@@ -65,6 +65,13 @@ Registered commands:
 - `/upgrade`
 - `/sessions`
 
+Runtime-registered when supervisor hook is injected on main agent:
+
+- `/agents`
+- `/agent_start` (and prefix form)
+- `/agent_stop` (and prefix form)
+- `/agent_restart` (and prefix form)
+
 `/stop` is intentionally not registered here; abort is middleware/bot-level behavior.
 
 Note:
@@ -81,6 +88,8 @@ Known model IDs are refreshed from:
 - Claude set (`haiku`, `sonnet`, `opus`)
 - Gemini aliases (`auto`, `pro`, `flash`, `flash-lite`)
 - discovered Gemini models from runtime cache
+
+Parser token rule is `@([a-zA-Z][a-zA-Z0-9_-]*)`; dotted model IDs are not parsed as a single directive token.
 
 Codex IDs are not included in inline directive-known set.
 
@@ -170,7 +179,7 @@ Callback namespace: `nsc:`
 - `submit_named_session(...)` creates a named session and submits to `BackgroundObserver`
 - `submit_named_followup_bg(...)` submits a background follow-up to an existing session
 - `active_background_tasks(...)` powers `/status` visibility for running tasks
-- `abort(chat_id)` kills active CLI processes and cancels chat-scoped background tasks
+- `abort(chat_id)` kills active CLI processes, cancels chat-scoped background tasks, and ends all named sessions for that chat
 - result delivery is delegated via `set_session_result_handler(...)` to bot layer callbacks
 
 ## Webhook wiring
@@ -187,7 +196,7 @@ This keeps wake dispatch behind the same per-chat lock as normal messages.
 `_start_api_server()` in `core.py`:
 
 1. auto-generates `api.token` when empty and persists it to `config.json`
-2. computes default API `chat_id` from `config.api.chat_id` (`>0`) or first `allowed_user_ids` entry (fallback `1`)
+2. computes default API `chat_id` from `config.api.chat_id` using truthiness (`0` falls back) or first `allowed_user_ids` entry (fallback `1`)
 3. constructs `ApiServer(config.api, default_chat_id=...)`
 4. wires callbacks:
    - message streaming -> `handle_message_streaming`
@@ -198,7 +207,7 @@ This keeps wake dispatch behind the same per-chat lock as normal messages.
    - workspace root for relative prompt paths
 6. starts aiohttp server
 
-Clients can still override session per connection via auth payload `{"type":"auth","chat_id":...}`.
+Clients can still override session per connection via auth payload `{"type":"auth","chat_id":...}` (positive int only).
 
 ## Shutdown
 

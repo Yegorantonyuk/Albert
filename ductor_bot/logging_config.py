@@ -31,15 +31,21 @@ _ANSI = {
 }
 _RESET = "\x1b[0m"
 
-_queue_listener: QueueListener | None = None
-_atexit_registered: bool = False
+
+class _LogState:
+    """Mutable container for module-level logging state."""
+
+    listener: QueueListener | None = None
+    atexit_registered: bool = False
+
+
+_state = _LogState()
 
 
 def _stop_queue_listener() -> None:
-    global _queue_listener  # noqa: PLW0603
-    if _queue_listener is not None:
-        _queue_listener.stop()
-        _queue_listener = None
+    if _state.listener is not None:
+        _state.listener.stop()
+        _state.listener = None
 
 
 class _ColorFormatter(logging.Formatter):
@@ -116,13 +122,12 @@ def setup_logging(
         queue_handler.addFilter(ctx_filter)
         root.addHandler(queue_handler)
 
-        global _queue_listener, _atexit_registered  # noqa: PLW0603
         listener = QueueListener(log_queue, file_handler, respect_handler_level=True)
         listener.start()
-        _queue_listener = listener
-        if not _atexit_registered:
+        _state.listener = listener
+        if not _state.atexit_registered:
             atexit.register(_stop_queue_listener)
-            _atexit_registered = True
+            _state.atexit_registered = True
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)

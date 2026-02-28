@@ -57,7 +57,8 @@ class InternalAgentAPI:
             logger.info("Internal agent API listening on 127.0.0.1:%d", self._port)
         except OSError:
             logger.exception(
-                "Failed to start internal agent API on port %d", self._port,
+                "Failed to start internal agent API on port %d",
+                self._port,
             )
 
     async def stop(self) -> None:

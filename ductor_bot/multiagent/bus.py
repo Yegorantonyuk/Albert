@@ -101,7 +101,7 @@ class InterAgentBus:
         recipient: str,
         message: str,
         *,
-        timeout: float = _DEFAULT_TIMEOUT,
+        send_timeout: float = _DEFAULT_TIMEOUT,
     ) -> InterAgentResponse:
         """Send a message to another agent and wait for the response.
 
@@ -128,7 +128,7 @@ class InterAgentBus:
         logger.info("Bus: %s -> %s (%d chars)", sender, recipient, len(message))
 
         try:
-            orch = target.bot._orchestrator
+            orch = target.bot.orchestrator
             if orch is None:
                 return InterAgentResponse(
                     sender=recipient,
@@ -139,21 +139,23 @@ class InterAgentBus:
 
             result = await asyncio.wait_for(
                 orch.handle_interagent_message(sender, message),
-                timeout=timeout,
+                timeout=send_timeout,
             )
             logger.info(
                 "Bus: %s -> %s completed (%d chars response)",
-                sender, recipient, len(result),
+                sender,
+                recipient,
+                len(result),
             )
             return InterAgentResponse(sender=recipient, text=result)
 
-        except asyncio.TimeoutError:
-            logger.warning("Bus: %s -> %s timed out after %.0fs", sender, recipient, timeout)
+        except TimeoutError:
+            logger.warning("Bus: %s -> %s timed out after %.0fs", sender, recipient, send_timeout)
             return InterAgentResponse(
                 sender=recipient,
                 text="",
                 success=False,
-                error=f"Timeout after {timeout:.0f}s",
+                error=f"Timeout after {send_timeout:.0f}s",
             )
         except Exception as exc:
             logger.exception("Bus: %s -> %s failed", sender, recipient)
@@ -167,7 +169,9 @@ class InterAgentBus:
     # -- Async (fire-and-forget) communication ---------------------------------
 
     def set_async_result_handler(
-        self, agent_name: str, handler: AsyncResultCallback,
+        self,
+        agent_name: str,
+        handler: AsyncResultCallback,
     ) -> None:
         """Register callback for delivering async results back to a sender agent."""
         self._async_result_handlers[agent_name] = handler
@@ -195,7 +199,8 @@ class InterAgentBus:
             message=message,
         )
         atask = asyncio.create_task(
-            self._run_async(task), name=f"ia-async:{sender}->{recipient}:{task_id}",
+            self._run_async(task),
+            name=f"ia-async:{sender}->{recipient}:{task_id}",
         )
         task.asyncio_task = atask
         atask.add_done_callback(lambda _: self._async_tasks.pop(task_id, None))
@@ -208,7 +213,10 @@ class InterAgentBus:
 
         logger.info(
             "Bus async: %s -> %s task=%s (%d chars)",
-            sender, recipient, task_id, len(message),
+            sender,
+            recipient,
+            task_id,
+            len(message),
         )
         return task_id
 
@@ -217,18 +225,20 @@ class InterAgentBus:
         t0 = time.time()
         try:
             target = self._agents[task.recipient]
-            orch = target.bot._orchestrator
+            orch = target.bot.orchestrator
             if orch is None:
-                await self._deliver_async_result(AsyncInterAgentResult(
-                    task_id=task.task_id,
-                    sender=task.sender,
-                    recipient=task.recipient,
-                    message_preview=task.message[:60],
-                    result_text="",
-                    success=False,
-                    error=f"Agent '{task.recipient}' orchestrator not initialized",
-                    elapsed_seconds=time.time() - t0,
-                ))
+                await self._deliver_async_result(
+                    AsyncInterAgentResult(
+                        task_id=task.task_id,
+                        sender=task.sender,
+                        recipient=task.recipient,
+                        message_preview=task.message[:60],
+                        result_text="",
+                        success=False,
+                        error=f"Agent '{task.recipient}' orchestrator not initialized",
+                        elapsed_seconds=time.time() - t0,
+                    )
+                )
                 return
 
             result_text = await asyncio.wait_for(
@@ -237,47 +247,58 @@ class InterAgentBus:
             )
             logger.info(
                 "Bus async: %s -> %s task=%s completed (%d chars, %.1fs)",
-                task.sender, task.recipient, task.task_id,
-                len(result_text), time.time() - t0,
+                task.sender,
+                task.recipient,
+                task.task_id,
+                len(result_text),
+                time.time() - t0,
             )
-            await self._deliver_async_result(AsyncInterAgentResult(
-                task_id=task.task_id,
-                sender=task.sender,
-                recipient=task.recipient,
-                message_preview=task.message[:60],
-                result_text=result_text,
-                success=True,
-                elapsed_seconds=time.time() - t0,
-            ))
+            await self._deliver_async_result(
+                AsyncInterAgentResult(
+                    task_id=task.task_id,
+                    sender=task.sender,
+                    recipient=task.recipient,
+                    message_preview=task.message[:60],
+                    result_text=result_text,
+                    success=True,
+                    elapsed_seconds=time.time() - t0,
+                )
+            )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Bus async: %s -> %s task=%s timed out",
-                task.sender, task.recipient, task.task_id,
+                task.sender,
+                task.recipient,
+                task.task_id,
             )
-            await self._deliver_async_result(AsyncInterAgentResult(
-                task_id=task.task_id,
-                sender=task.sender,
-                recipient=task.recipient,
-                message_preview=task.message[:60],
-                result_text="",
-                success=False,
-                error=f"Timeout after {_DEFAULT_TIMEOUT:.0f}s",
-                elapsed_seconds=time.time() - t0,
-            ))
+            await self._deliver_async_result(
+                AsyncInterAgentResult(
+                    task_id=task.task_id,
+                    sender=task.sender,
+                    recipient=task.recipient,
+                    message_preview=task.message[:60],
+                    result_text="",
+                    success=False,
+                    error=f"Timeout after {_DEFAULT_TIMEOUT:.0f}s",
+                    elapsed_seconds=time.time() - t0,
+                )
+            )
 
         except Exception as exc:
             logger.exception("Bus async: %s -> %s failed", task.sender, task.recipient)
-            await self._deliver_async_result(AsyncInterAgentResult(
-                task_id=task.task_id,
-                sender=task.sender,
-                recipient=task.recipient,
-                message_preview=task.message[:60],
-                result_text="",
-                success=False,
-                error=f"{type(exc).__name__}: {exc}",
-                elapsed_seconds=time.time() - t0,
-            ))
+            await self._deliver_async_result(
+                AsyncInterAgentResult(
+                    task_id=task.task_id,
+                    sender=task.sender,
+                    recipient=task.recipient,
+                    message_preview=task.message[:60],
+                    result_text="",
+                    success=False,
+                    error=f"{type(exc).__name__}: {exc}",
+                    elapsed_seconds=time.time() - t0,
+                )
+            )
 
     async def _deliver_async_result(self, result: AsyncInterAgentResult) -> None:
         """Deliver an async result to the sender agent's callback handler."""
@@ -285,7 +306,8 @@ class InterAgentBus:
         if handler is None:
             logger.warning(
                 "No async result handler for sender '%s' task=%s — result lost",
-                result.sender, result.task_id,
+                result.sender,
+                result.task_id,
             )
             return
         try:
@@ -293,7 +315,8 @@ class InterAgentBus:
         except Exception:
             logger.exception(
                 "Error delivering async result task=%s to '%s' — result lost",
-                result.task_id, result.sender,
+                result.task_id,
+                result.sender,
             )
 
     async def cancel_all_async(self) -> int:
@@ -306,7 +329,9 @@ class InterAgentBus:
                 cancelled += 1
                 logger.warning(
                     "Cancelled in-flight async task=%s (%s -> %s)",
-                    task.task_id, task.sender, task.recipient,
+                    task.task_id,
+                    task.sender,
+                    task.recipient,
                 )
         self._async_tasks.clear()
         return cancelled

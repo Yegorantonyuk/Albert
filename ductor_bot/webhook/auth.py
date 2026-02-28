@@ -8,6 +8,7 @@ import logging
 import re
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,6 +21,28 @@ _HASH_ALGORITHMS: dict[str, str] = {
     "sha1": "sha1",
     "sha512": "sha512",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class HmacConfig:
+    """HMAC validation parameters extracted from a webhook entry."""
+
+    algorithm: str = "sha256"
+    encoding: str = "hex"
+    sig_prefix: str = "sha256="
+    sig_regex: str = ""
+    payload_prefix_regex: str = ""
+
+    @classmethod
+    def from_hook(cls, hook: WebhookEntry) -> HmacConfig:
+        """Build from a WebhookEntry's HMAC fields."""
+        return cls(
+            algorithm=hook.hmac_algorithm,
+            encoding=hook.hmac_encoding,
+            sig_prefix=hook.hmac_sig_prefix,
+            sig_regex=hook.hmac_sig_regex,
+            payload_prefix_regex=hook.hmac_payload_prefix_regex,
+        )
 
 
 def validate_bearer_token(authorization: str, expected_token: str) -> bool:
@@ -37,62 +60,50 @@ def validate_bearer_token(authorization: str, expected_token: str) -> bool:
     return valid
 
 
-def validate_hmac_signature(  # noqa: PLR0913
+def _extract_signature(signature_value: str, cfg: HmacConfig) -> str | None:
+    """Extract the actual signature from a header value, returning None on failure."""
+    if cfg.sig_regex:
+        m = re.search(cfg.sig_regex, signature_value)
+        if not m or not m.group(1):
+            logger.warning("HMAC auth failed: sig_regex did not match")
+            return None
+        return m.group(1)
+    if cfg.sig_prefix:
+        return signature_value.removeprefix(cfg.sig_prefix)
+    return signature_value
+
+
+def validate_hmac_signature(
     body: bytes,
     signature_value: str,
     secret: str,
-    *,
-    algorithm: str = "sha256",
-    encoding: str = "hex",
-    sig_prefix: str = "sha256=",
-    sig_regex: str = "",
-    payload_prefix_regex: str = "",
+    cfg: HmacConfig | None = None,
 ) -> bool:
-    """Validate an HMAC signature with fully configurable parameters.
-
-    Args:
-        body: Raw request body bytes.
-        signature_value: The full header value containing the signature.
-        secret: The shared HMAC secret.
-        algorithm: Hash algorithm (``sha256``, ``sha1``, ``sha512``).
-        encoding: Signature encoding (``hex`` or ``base64``).
-        sig_prefix: Simple prefix to strip from *signature_value* before comparison.
-            Ignored when *sig_regex* is set.
-        sig_regex: Regex to extract the signature from *signature_value* (group 1).
-            Overrides *sig_prefix* when non-empty.
-        payload_prefix_regex: Regex applied to *signature_value*; group 1 is prepended
-            to *body* with a ``"."`` separator before HMAC computation.
-            Used by Stripe/Slack where the signed content is ``"{timestamp}.{body}"``.
-    """
+    """Validate an HMAC signature with fully configurable parameters."""
     if not signature_value or not secret:
         logger.warning("HMAC auth failed: missing signature or secret")
         return False
 
-    # 1. Extract actual signature from header value
-    if sig_regex:
-        m = re.search(sig_regex, signature_value)
-        if not m or not m.group(1):
-            logger.warning("HMAC auth failed: sig_regex did not match")
-            return False
-        sig = m.group(1)
-    elif sig_prefix:
-        sig = signature_value.removeprefix(sig_prefix)
-    else:
-        sig = signature_value
+    if cfg is None:
+        cfg = HmacConfig()
 
-    # 2. Construct payload to sign (optionally prepend extracted prefix)
+    sig = _extract_signature(signature_value, cfg)
+    if sig is None:
+        return False
+
+    # Construct payload to sign (optionally prepend extracted prefix)
     signed_payload = body
-    if payload_prefix_regex:
-        m = re.search(payload_prefix_regex, signature_value)
+    if cfg.payload_prefix_regex:
+        m = re.search(cfg.payload_prefix_regex, signature_value)
         if m and m.group(1):
             signed_payload = m.group(1).encode() + b"." + body
 
-    # 3. Compute HMAC with configured algorithm
-    algo = _HASH_ALGORITHMS.get(algorithm, "sha256")
+    # Compute HMAC with configured algorithm
+    algo = _HASH_ALGORITHMS.get(cfg.algorithm, "sha256")
     computed = hmac.new(secret.encode(), signed_payload, algo)
 
-    # 4. Encode and compare
-    if encoding == "base64":
+    # Encode and compare
+    if cfg.encoding == "base64":
         expected = base64.b64encode(computed.digest()).decode()
     else:
         expected = computed.hexdigest()
@@ -100,7 +111,9 @@ def validate_hmac_signature(  # noqa: PLR0913
     valid = hmac.compare_digest(sig, expected)
     if not valid:
         logger.warning(
-            "HMAC auth failed: signature mismatch (algo=%s, enc=%s)", algorithm, encoding
+            "HMAC auth failed: signature mismatch (algo=%s, enc=%s)",
+            cfg.algorithm,
+            cfg.encoding,
         )
     return valid
 
@@ -123,11 +136,7 @@ def validate_hook_auth(
             body,
             signature_header_value,
             hook.hmac_secret,
-            algorithm=hook.hmac_algorithm,
-            encoding=hook.hmac_encoding,
-            sig_prefix=hook.hmac_sig_prefix,
-            sig_regex=hook.hmac_sig_regex,
-            payload_prefix_regex=hook.hmac_payload_prefix_regex,
+            cfg=HmacConfig.from_hook(hook),
         )
 
     # Bearer mode (default for unrecognized auth_mode too)

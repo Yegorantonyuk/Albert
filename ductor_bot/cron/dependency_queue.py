@@ -151,12 +151,11 @@ class DependencyQueue:
         return sorted(set(self._locks.keys()) | set(self._queues.keys()))
 
 
-_dependency_queue: DependencyQueue | None = None
+_dependency_queue: list[DependencyQueue | None] = [None]
 
 
 def get_dependency_queue() -> DependencyQueue:
     """Get or create the global dependency queue singleton."""
-    global _dependency_queue  # noqa: PLW0603
-    if _dependency_queue is None:
-        _dependency_queue = DependencyQueue()
-    return _dependency_queue
+    if _dependency_queue[0] is None:
+        _dependency_queue[0] = DependencyQueue()
+    return _dependency_queue[0]

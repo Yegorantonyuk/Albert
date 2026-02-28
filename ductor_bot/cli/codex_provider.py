@@ -20,6 +20,7 @@ from ductor_bot.cli.codex_events import (
 )
 from ductor_bot.cli.executor import (
     SubprocessResult,
+    SubprocessSpec,
     run_oneshot_subprocess,
     run_streaming_subprocess,
 )
@@ -158,10 +159,7 @@ class CodexCLI(BaseCLI):
         _log_cmd(exec_cmd)
         return await run_oneshot_subprocess(
             config=self._config,
-            exec_cmd=exec_cmd,
-            use_cwd=use_cwd,
-            prompt=prompt,
-            timeout_seconds=timeout_seconds,
+            spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds),
             parse_output=self._parse_output,
             provider_label="Codex",
         )
@@ -197,10 +195,7 @@ class CodexCLI(BaseCLI):
 
         async for event in run_streaming_subprocess(
             config=self._config,
-            exec_cmd=exec_cmd,
-            use_cwd=use_cwd,
-            prompt=prompt,
-            timeout_seconds=timeout_seconds,
+            spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds),
             line_handler=line_handler,
             provider_label="Codex",
             post_handler=post_handler,

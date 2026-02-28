@@ -23,7 +23,12 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from ductor_bot.config import DEFAULT_EMPTY_GEMINI_API_KEY, AgentConfig, deep_merge_config
+from ductor_bot.config import (
+    _BIND_ALL_INTERFACES,
+    DEFAULT_EMPTY_GEMINI_API_KEY,
+    AgentConfig,
+    deep_merge_config,
+)
 from ductor_bot.infra.restart import EXIT_RESTART
 from ductor_bot.logging_config import setup_logging
 from ductor_bot.workspace.init import init_workspace
@@ -84,15 +89,11 @@ def _robust_rmtree(path: Path) -> None:
 def _re_exec_bot() -> NoReturn:
     """Re-exec the bot process (cross-platform).
 
-    On POSIX: replaces current process via ``os.execv`` (same PID, same cgroup).
-    On Windows: spawns new process and exits (``os.execv`` doesn't truly replace).
+    Spawns a new Python process running ``ductor_bot`` and exits the current one.
+    Under a service manager the caller should ``sys.exit(EXIT_RESTART)`` instead.
     """
-    args = [sys.executable, "-m", "ductor_bot"]
-    if _IS_WINDOWS:
-        subprocess.Popen(args)
-        sys.exit(0)
-    else:
-        os.execv(sys.executable, args)  # noqa: S606
+    subprocess.Popen([sys.executable, "-m", "ductor_bot"])
+    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +532,7 @@ def _print_status() -> None:
     # Show sub-agents
     agents = _load_agents_registry(paths)
     if agents:
-        _print_agents_status(agents, paths, bot_running=bot_running)
+        _print_agents_status(agents, bot_running=bot_running)
 
 
 def _count_log_errors(log_dir: Path) -> int:
@@ -557,14 +558,15 @@ def _fetch_live_health() -> dict[str, dict[str, object]]:
 
     try:
         req = urllib.request.Request("http://127.0.0.1:8799/interagent/health")
-        with urllib.request.urlopen(req, timeout=2) as resp:
+        opener = urllib.request.build_opener()
+        with opener.open(req, timeout=2) as resp:
             data = json.loads(resp.read())
         return data.get("agents", {})
     except Exception:
         return {}
 
 
-def _print_agents_status(agents: list[dict[str, object]], paths: DuctorPaths, bot_running: bool = False) -> None:
+def _print_agents_status(agents: list[dict[str, object]], *, bot_running: bool = False) -> None:
     """Print a status table for all sub-agents with optional live health."""
     live_health = _fetch_live_health() if bot_running else {}
 
@@ -575,7 +577,7 @@ def _print_agents_status(agents: list[dict[str, object]], paths: DuctorPaths, bo
     table.add_column("Provider")
     table.add_column("Model")
 
-    _STATUS_STYLE = {
+    status_style = {
         "running": "[bold green]running[/bold green]",
         "starting": "[yellow]starting[/yellow]",
         "crashed": "[bold red]crashed[/bold red]",
@@ -590,7 +592,7 @@ def _print_agents_status(agents: list[dict[str, object]], paths: DuctorPaths, bo
         health = live_health.get(name, {})
         status = str(health.get("status", "unknown")) if health else "—"
         uptime = str(health.get("uptime", "")) if health else ""
-        status_display = _STATUS_STYLE.get(status, f"[dim]{status}[/dim]")
+        status_display = status_style.get(status, f"[dim]{status}[/dim]")
 
         crash_info = ""
         if status == "crashed" and health.get("last_crash_error"):
@@ -677,30 +679,36 @@ def _agents_list() -> None:
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip())
             from ductor_bot.infra.pidlock import _is_process_alive
+
             bot_running = _is_process_alive(pid)
         except (ValueError, OSError):
             pass
-    _print_agents_status(agents, paths, bot_running=bot_running)
+    _print_agents_status(agents, bot_running=bot_running)
+
+
+def _validate_agent_name(name: str | None, agents: list[dict[str, object]]) -> str | None:
+    """Validate an agent name for ``ductor agents add``. Returns clean name or None on error."""
+    if not name:
+        _console.print("[bold red]Usage: ductor agents add <name>[/bold red]")
+        return None
+    name = name.lower().strip()
+    if name == "main":
+        _console.print("[bold red]Name 'main' is reserved.[/bold red]")
+        return None
+    if any(str(a.get("name", "")).lower() == name for a in agents):
+        _console.print(f"[bold red]Agent '{name}' already exists.[/bold red]")
+        return None
+    return name
 
 
 def _agents_add(rest: list[str]) -> None:
     """Add a new sub-agent interactively."""
     import questionary
 
-    name = rest[0] if rest else None
-    if not name:
-        _console.print("[bold red]Usage: ductor agents add <name>[/bold red]")
-        return
-
-    name = name.lower().strip()
-    if name == "main":
-        _console.print("[bold red]Name 'main' is reserved.[/bold red]")
-        return
-
     paths = resolve_paths()
     agents = _load_agents_registry(paths)
-    if any(str(a.get("name", "")).lower() == name for a in agents):
-        _console.print(f"[bold red]Agent '{name}' already exists.[/bold red]")
+    name = _validate_agent_name(rest[0] if rest else None, agents)
+    if name is None:
         return
 
     token: str | None = questionary.text(
@@ -718,10 +726,10 @@ def _agents_add(rest: list[str]) -> None:
         return
 
     user_ids: list[int] = []
-    for part in users_raw.split(","):
-        part = part.strip()
-        if part.isdigit():
-            user_ids.append(int(part))
+    for raw_id in users_raw.split(","):
+        stripped = raw_id.strip()
+        if stripped.isdigit():
+            user_ids.append(int(stripped))
 
     provider: str | None = questionary.select(
         "Provider:",
@@ -1472,12 +1480,9 @@ def _print_api_help() -> None:
 
 def _nacl_available() -> bool:
     """Check if PyNaCl is importable."""
-    try:
-        import nacl.public  # noqa: F401
-    except ImportError:
-        return False
-    else:
-        return True
+    from importlib.util import find_spec
+
+    return find_spec("nacl.public") is not None
 
 
 def _api_install_hint() -> str:
@@ -1519,7 +1524,7 @@ def _api_enable() -> None:
     api["enabled"] = True
     if not api.get("token"):
         api["token"] = _secrets.token_urlsafe(32)
-    api.setdefault("host", "0.0.0.0")  # noqa: S104
+    api.setdefault("host", _BIND_ALL_INTERFACES)
     api.setdefault("port", 8741)
     api.setdefault("chat_id", 0)
     api.setdefault("allow_public", False)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ductor_bot.bot.sender import send_files_from_text, send_rich
+from ductor_bot.bot.sender import SendRichOpts, send_files_from_text, send_rich
 from ductor_bot.bot.streaming import create_stream_editor
 from ductor_bot.bot.typing import TypingContext
 from ductor_bot.cli.coalescer import CoalesceConfig, StreamCoalescer
@@ -56,13 +56,16 @@ async def run_non_streaming_message(
     async with TypingContext(dispatch.bot, dispatch.chat_id, thread_id=dispatch.thread_id):
         result = await dispatch.orchestrator.handle_message(dispatch.chat_id, dispatch.text)
 
+    reply_id = dispatch.reply_to.message_id if dispatch.reply_to else None
     await send_rich(
         dispatch.bot,
         dispatch.chat_id,
         result.text,
-        reply_to=dispatch.reply_to,
-        allowed_roots=dispatch.allowed_roots,
-        thread_id=dispatch.thread_id,
+        SendRichOpts(
+            reply_to_message_id=reply_id,
+            allowed_roots=dispatch.allowed_roots,
+            thread_id=dispatch.thread_id,
+        ),
     )
     return result.text
 
@@ -133,9 +136,11 @@ async def run_streaming_message(
             dispatch.bot,
             dispatch.chat_id,
             result.text,
-            reply_to=dispatch.message,
-            allowed_roots=dispatch.allowed_roots,
-            thread_id=dispatch.thread_id,
+            SendRichOpts(
+                reply_to_message_id=dispatch.message.message_id,
+                allowed_roots=dispatch.allowed_roots,
+                thread_id=dispatch.thread_id,
+            ),
         )
     else:
         await send_files_from_text(

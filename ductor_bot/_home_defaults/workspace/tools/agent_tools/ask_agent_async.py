@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Send an async message to another agent via the InterAgentBus.
+"""Send an async task to another agent via the InterAgentBus.
 
 Unlike ask_agent.py, this returns immediately with a task_id.
-The response will be delivered to your Telegram chat when ready.
+The sub-agent's response is delivered back to YOUR Telegram chat
+(the calling agent's chat) when ready — NOT to the sub-agent's chat.
+
+The response ALWAYS comes back to YOU (the calling agent). There is no way
+to make the sub-agent reply in its own Telegram chat via this tool.
 
 Uses the internal localhost HTTP API to communicate with the bus.
-Environment variables DUCTOR_AGENT_NAME and DUCTOR_INTERAGENT_PORT
-are automatically set by the Ductor framework.
+Environment variables DUCTOR_AGENT_NAME, DUCTOR_INTERAGENT_PORT, and
+DUCTOR_INTERAGENT_HOST are automatically set by the Ductor framework.
 
 Usage:
     python3 ask_agent_async.py TARGET_AGENT "Your message here"
@@ -29,9 +33,10 @@ def main() -> None:
     target = sys.argv[1]
     message = sys.argv[2]
     port = os.environ.get("DUCTOR_INTERAGENT_PORT", "8799")
+    host = os.environ.get("DUCTOR_INTERAGENT_HOST", "127.0.0.1")
     sender = os.environ.get("DUCTOR_AGENT_NAME", "unknown")
 
-    url = f"http://127.0.0.1:{port}/interagent/send_async"
+    url = f"http://{host}:{port}/interagent/send_async"
     payload = json.dumps({"from": sender, "to": target, "message": message}).encode()
 
     req = urllib.request.Request(
@@ -46,7 +51,9 @@ def main() -> None:
             result = json.loads(resp.read().decode())
     except urllib.error.URLError as e:
         print(f"Error: Cannot reach inter-agent API at {url}: {e}", file=sys.stderr)
-        print("Make sure the Ductor supervisor is running with multi-agent support.", file=sys.stderr)
+        print(
+            "Make sure the Ductor supervisor is running with multi-agent support.", file=sys.stderr
+        )
         sys.exit(1)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -55,8 +62,8 @@ def main() -> None:
     if result.get("success"):
         task_id = result.get("task_id", "unknown")
         print(
-            f"Async request sent to '{target}' (task_id: {task_id}). "
-            f"The response will be delivered to your Telegram chat when ready."
+            f"Async task sent to '{target}' (task_id: {task_id}). "
+            f"The response will be delivered back to your chat when ready."
         )
     else:
         error = result.get("error", "Unknown error")
