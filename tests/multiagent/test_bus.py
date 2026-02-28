@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import unittest.mock
 from unittest.mock import AsyncMock, MagicMock
 
 from ductor_bot.multiagent.bus import InterAgentBus
@@ -211,3 +212,178 @@ class TestBusCancelAllAsync:
         bus = InterAgentBus()
         cancelled = await bus.cancel_all_async()
         assert cancelled == 0
+
+
+class TestBusNewSessionFlag:
+    """Test new_session flag propagation through sync and async paths."""
+
+    async def test_sync_send_passes_new_session_false(self) -> None:
+        bus = InterAgentBus()
+        stack = _make_stack("ok")
+        bus.register("target", stack)
+        await bus.send("sender", "target", "Hello")
+        stack.bot.orchestrator.handle_interagent_message.assert_awaited_once_with(
+            "sender", "Hello", new_session=False,
+        )
+
+    async def test_sync_send_passes_new_session_true(self) -> None:
+        bus = InterAgentBus()
+        stack = _make_stack("ok")
+        bus.register("target", stack)
+        await bus.send("sender", "target", "Hello", new_session=True)
+        stack.bot.orchestrator.handle_interagent_message.assert_awaited_once_with(
+            "sender", "Hello", new_session=True,
+        )
+
+    async def test_async_send_passes_new_session_to_handler(self) -> None:
+        """new_session=True is forwarded through _run_async to the orchestrator."""
+        bus = InterAgentBus()
+        call_kwargs: list[dict[str, object]] = []
+
+        async def capturing_handler(sender: str, msg: str, **kw: object) -> tuple[str, str]:
+            call_kwargs.append({"sender": sender, "msg": msg, **kw})
+            return "done", "ia-sender"
+
+        stack = _make_stack()
+        stack.bot.orchestrator.handle_interagent_message = capturing_handler
+        # Suppress notification
+        stack.bot._config = MagicMock()
+        stack.bot._config.allowed_user_ids = []
+        bus.register("target", stack)
+
+        bus.send_async("sender", "target", "Hello", new_session=True)
+        await asyncio.sleep(0.1)
+
+        assert len(call_kwargs) == 1
+        assert call_kwargs[0]["new_session"] is True
+
+    async def test_async_send_new_session_false_by_default(self) -> None:
+        bus = InterAgentBus()
+        call_kwargs: list[dict[str, object]] = []
+
+        async def capturing_handler(sender: str, msg: str, **kw: object) -> tuple[str, str]:
+            call_kwargs.append({"sender": sender, "msg": msg, **kw})
+            return "done", "ia-sender"
+
+        stack = _make_stack()
+        stack.bot.orchestrator.handle_interagent_message = capturing_handler
+        stack.bot._config = MagicMock()
+        stack.bot._config.allowed_user_ids = []
+        bus.register("target", stack)
+
+        bus.send_async("sender", "target", "Hello")
+        await asyncio.sleep(0.1)
+
+        assert len(call_kwargs) == 1
+        assert call_kwargs[0]["new_session"] is False
+
+
+class TestBusSessionNameInResult:
+    """Test that session_name is propagated through async results."""
+
+    async def test_async_result_contains_session_name(self) -> None:
+        bus = InterAgentBus()
+        stack = _make_stack("response", session_name="ia-main")
+        stack.bot._config = MagicMock()
+        stack.bot._config.allowed_user_ids = []
+        bus.register("target", stack)
+
+        delivered: list[object] = []
+        bus.set_async_result_handler("sender", AsyncMock(side_effect=delivered.append))
+
+        bus.send_async("sender", "target", "Hello")
+        await asyncio.sleep(0.1)
+
+        assert len(delivered) == 1
+        assert delivered[0].session_name == "ia-main"
+
+    async def test_async_result_default_session_name(self) -> None:
+        """Default session_name from _make_stack is 'ia-sender'."""
+        bus = InterAgentBus()
+        stack = _make_stack("ok")
+        stack.bot._config = MagicMock()
+        stack.bot._config.allowed_user_ids = []
+        bus.register("target", stack)
+
+        delivered: list[object] = []
+        bus.set_async_result_handler("caller", AsyncMock(side_effect=delivered.append))
+
+        bus.send_async("caller", "target", "Hello")
+        await asyncio.sleep(0.1)
+
+        assert len(delivered) == 1
+        assert delivered[0].session_name == "ia-sender"
+
+
+class TestBusNotifyRecipient:
+    """Test _notify_recipient behavior."""
+
+    async def test_notify_sends_telegram_message(self) -> None:
+        """Notification is sent to the recipient's first allowed user."""
+        bus = InterAgentBus()
+        stack = _make_stack()
+        stack.bot._config = MagicMock()
+        stack.bot._config.allowed_user_ids = [12345]
+        bus.register("target", stack)
+
+        from ductor_bot.multiagent.bus import AsyncInterAgentTask
+
+        task = AsyncInterAgentTask(
+            task_id="abc123",
+            sender="main",
+            recipient="target",
+            message="Do something important",
+        )
+
+        with unittest.mock.patch("ductor_bot.bot.sender.send_rich", new_callable=AsyncMock) as mock_send:
+            await bus._notify_recipient(task)
+            mock_send.assert_awaited_once()
+            call_args = mock_send.call_args
+            assert call_args[0][1] == 12345  # chat_id
+            assert "main" in call_args[0][2]  # sender name in text
+            assert "ia-main" in call_args[0][2]  # session name in text
+
+    async def test_notify_skipped_when_no_users(self) -> None:
+        bus = InterAgentBus()
+        stack = _make_stack()
+        stack.bot._config = MagicMock()
+        stack.bot._config.allowed_user_ids = []
+        bus.register("target", stack)
+
+        from ductor_bot.multiagent.bus import AsyncInterAgentTask
+
+        task = AsyncInterAgentTask(
+            task_id="abc123",
+            sender="main",
+            recipient="target",
+            message="Hello",
+        )
+
+        with unittest.mock.patch("ductor_bot.bot.sender.send_rich", new_callable=AsyncMock) as mock_send:
+            await bus._notify_recipient(task)
+            mock_send.assert_not_awaited()
+
+    async def test_notify_failure_does_not_raise(self) -> None:
+        """Notification errors are swallowed (best-effort)."""
+        bus = InterAgentBus()
+        stack = _make_stack()
+        stack.bot._config = MagicMock()
+        stack.bot._config.allowed_user_ids = [99]
+        bus.register("target", stack)
+
+        from ductor_bot.multiagent.bus import AsyncInterAgentTask
+
+        task = AsyncInterAgentTask(
+            task_id="x",
+            sender="main",
+            recipient="target",
+            message="test",
+        )
+
+        with unittest.mock.patch(
+            "ductor_bot.bot.sender.send_rich",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("network error"),
+        ):
+            # Should not raise
+            await bus._notify_recipient(task)

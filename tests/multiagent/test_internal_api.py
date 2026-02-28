@@ -115,6 +115,76 @@ class TestHandleSendAsync:
         assert resp.status == 400
 
 
+class TestNewSessionFlag:
+    """Test new_session flag in /interagent/send and /interagent/send_async."""
+
+    async def test_send_passes_new_session_true(
+        self, client: TestClient, bus: InterAgentBus
+    ) -> None:
+        stack = MagicMock()
+        stack.bot.orchestrator = MagicMock()
+        stack.bot.orchestrator.handle_interagent_message = AsyncMock(
+            return_value=("OK", "ia-sender")
+        )
+        bus.register("target", stack)
+
+        resp = await client.post(
+            "/interagent/send",
+            json={
+                "from": "sender",
+                "to": "target",
+                "message": "Hello",
+                "new_session": True,
+            },
+        )
+        assert resp.status == 200
+        stack.bot.orchestrator.handle_interagent_message.assert_awaited_once_with(
+            "sender", "Hello", new_session=True,
+        )
+
+    async def test_send_defaults_new_session_false(
+        self, client: TestClient, bus: InterAgentBus
+    ) -> None:
+        stack = MagicMock()
+        stack.bot.orchestrator = MagicMock()
+        stack.bot.orchestrator.handle_interagent_message = AsyncMock(
+            return_value=("OK", "ia-sender")
+        )
+        bus.register("target", stack)
+
+        resp = await client.post(
+            "/interagent/send",
+            json={"from": "sender", "to": "target", "message": "Hello"},
+        )
+        assert resp.status == 200
+        stack.bot.orchestrator.handle_interagent_message.assert_awaited_once_with(
+            "sender", "Hello", new_session=False,
+        )
+
+    async def test_send_async_passes_new_session(
+        self, client: TestClient, bus: InterAgentBus
+    ) -> None:
+        stack = MagicMock()
+        stack.bot.orchestrator = MagicMock()
+        stack.bot.orchestrator.handle_interagent_message = AsyncMock(
+            return_value=("OK", "ia-sender")
+        )
+        bus.register("target", stack)
+
+        resp = await client.post(
+            "/interagent/send_async",
+            json={
+                "from": "sender",
+                "to": "target",
+                "message": "Hello",
+                "new_session": True,
+            },
+        )
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["success"] is True
+
+
 class TestHandleList:
     """Test GET /interagent/agents."""
 
