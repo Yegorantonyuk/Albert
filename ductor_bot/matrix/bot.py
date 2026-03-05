@@ -24,7 +24,6 @@ from ductor_bot.matrix.buttons import ButtonTracker
 from ductor_bot.matrix.credentials import login_or_restore
 from ductor_bot.matrix.id_map import MatrixIdMap
 from ductor_bot.matrix.sender import send_rich as matrix_send_rich
-from ductor_bot.matrix.streaming import MatrixStreamEditor
 from ductor_bot.matrix.typing import MatrixTypingContext
 from ductor_bot.notifications import NotificationService
 from ductor_bot.session.key import SessionKey
@@ -419,28 +418,60 @@ class MatrixBot:
     async def _run_streaming(
         self, key: SessionKey, text: str, room_id: str, event: object
     ) -> None:
-        """Run with streaming edits."""
+        """Run with streaming — each reasoning segment as a separate message.
+
+        Tool activity markers (``[TOOL: ...]``) are suppressed.  Instead,
+        the text produced between tool calls is flushed as its own message
+        so the user sees the reasoning unfold without noise.
+        """
         orch = self._orchestrator
         if orch is None:
             return
 
-        editor = MatrixStreamEditor(
-            self._client,
-            room_id,
-            min_edit_interval=self._config.streaming.edit_interval_seconds,
-        )
+        buffer = [""]
+
+        segment_count = [0]
+
+        async def _on_delta(delta: str) -> None:
+            buffer[0] += delta
+
+        async def _on_tool(tool_name: str) -> None:
+            # Flush the current reasoning segment as a new message.
+            segment_count[0] += 1
+            seg_text = buffer[0].strip()
+            logger.info(
+                "Matrix streaming: tool=%s segment=%d buf_len=%d",
+                tool_name,
+                segment_count[0],
+                len(seg_text),
+            )
+            if seg_text:
+                await self._send_rich(room_id, buffer[0])
+            buffer[0] = ""
 
         async with MatrixTypingContext(self._client, room_id):
-            async def _on_delta(delta: str) -> None:
-                await editor.append_text(delta)
-
             result = await orch.handle_message_streaming(
-                key, text, on_text_delta=_on_delta,
+                key,
+                text,
+                on_text_delta=_on_delta,
+                on_tool_activity=_on_tool,
             )
-            if result.text:
-                formatted = self._button_tracker.extract_and_format(room_id, result.text)
-                event_id = await editor.finalize(formatted)
-                self._track_sent_event(event_id)
+
+        # Send the final segment (with button extraction).
+        final_text = buffer[0].strip()
+        logger.info(
+            "Matrix streaming done: segments=%d final_buf_len=%d result_len=%d",
+            segment_count[0],
+            len(final_text),
+            len(result.text) if result.text else 0,
+        )
+        if final_text:
+            formatted = self._button_tracker.extract_and_format(room_id, final_text)
+            await self._send_rich(room_id, formatted)
+        elif result.text:
+            # Fallback: no deltas received but orchestrator returned text.
+            formatted = self._button_tracker.extract_and_format(room_id, result.text)
+            await self._send_rich(room_id, formatted)
 
     async def _run_non_streaming(
         self, key: SessionKey, text: str, room_id: str, event: object
