@@ -63,6 +63,7 @@ async def create_orchestrator(
         paths,
         docker_container=docker_container,
         agent_name=agent_name,
+        transport=config.transport,
     )
 
     orch = Orchestrator(config, paths, docker_container=docker_container, agent_name=agent_name)
