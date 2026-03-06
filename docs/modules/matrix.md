@@ -14,8 +14,19 @@ Alternative to the Telegram transport — selected via `config.transport = "matr
 - `matrix/buttons.py`: reaction-based button replacement; emoji digits + numbered text fallback
 - `matrix/formatting.py`: Markdown → Matrix HTML conversion
 - `matrix/typing.py`: typing indicator context manager with periodic keep-alive (5s interval)
+- `matrix/media.py`: incoming media handler; downloads files from homeserver, builds agent prompts via `files/prompt.py`
 - `matrix/streaming.py`: `MatrixStreamEditor` for `m.replace`-based streaming (unused; kept for reference)
 - `matrix/startup.py`: Matrix-specific startup (orchestrator, observers, restart sentinel)
+
+## Incoming media
+
+Matrix media (images, audio, video, files) is handled by `matrix/media.py`:
+
+1. `MatrixBot` registers `_on_media` callbacks for `RoomMessageImage`, `RoomMessageAudio`, `RoomMessageVideo`, `RoomMessageFile`
+2. `resolve_matrix_media()` downloads the file via `client.download(mxc=...)` to `workspace/matrix_files/YYYY-MM-DD/`
+3. A transport-agnostic prompt is built via `files/prompt.py` (`build_media_prompt`) and injected into the conversation
+
+Files are auto-cleaned by `CleanupObserver` using the same retention as Telegram files.
 
 ## Streaming
 
