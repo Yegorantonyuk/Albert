@@ -36,6 +36,12 @@ Provider-agnostic CLI execution layer for Claude Code, Codex, and Gemini.
 5. provider executes subprocess and returns `CLIResponse`.
 6. service converts to `AgentResponse`.
 
+Environment variables injected into every CLI subprocess (`executor.py` and `docker_wrap`):
+
+- `DUCTOR_CHAT_ID`
+- `DUCTOR_TOPIC_ID` (when set)
+- `DUCTOR_TRANSPORT` (active transport identifier, e.g. `"tg"`, `"mx"`)
+
 ## Main-chat CLI parameters
 
 Configured globally in `config.json`:
@@ -161,7 +167,8 @@ Statuses: `AUTHENTICATED`, `INSTALLED`, `NOT_FOUND`.
 
 `ProcessRegistry` provides:
 
-- registration/unregistration by chat
+- registration/unregistration by chat with optional `topic_id` tracking
+- `has_active(chat_id, topic_id=None)`: when `topic_id` is given, only processes for that specific topic are considered active; otherwise any process for the chat qualifies
 - abort markers (`was_aborted`, `clear_abort`)
 - `kill_all(chat_id)`
 - stale wall-clock cleanup (`kill_stale`)
@@ -175,7 +182,7 @@ Windows uses process-tree termination (`taskkill /F /T`) to avoid orphaned child
 - host mode (`config.docker_container == ""`): return original command + resolved local cwd
 - container mode:
   - wraps command as `docker exec ... <container> ...`,
-  - injects `DUCTOR_CHAT_ID`, optional `DUCTOR_TOPIC_ID`, `DUCTOR_AGENT_NAME`, `DUCTOR_INTERAGENT_PORT`, `DUCTOR_HOME`, `DUCTOR_SHARED_MEMORY_PATH`, and `DUCTOR_INTERAGENT_HOST`,
+  - injects `DUCTOR_CHAT_ID`, optional `DUCTOR_TOPIC_ID`, `DUCTOR_TRANSPORT`, `DUCTOR_AGENT_NAME`, `DUCTOR_INTERAGENT_PORT`, `DUCTOR_HOME`, `DUCTOR_SHARED_MEMORY_PATH`, and `DUCTOR_INTERAGENT_HOST`,
   - merges user secrets from `~/.ductor/.env` (never overrides existing vars),
   - forwards optional env vars via `-e` flags (`extra_env`, overrides `.env`),
   - uses `-i` when `interactive=True` (required for stdin-fed providers like Gemini),

@@ -84,10 +84,10 @@ Telegram startup:
 6. register config hot-reload callback for auth/group updates
 7. startup classification (`first_start`/`service_restart`/`system_reboot`) + startup notification policy
 8. recovery planning (`inflight_turns.json` + recovered named sessions)
-9. start update observer (upgradeable installs only), sync Telegram commands, start restart watcher
+9. start update observer (upgradeable installs only, main agent only), sync Telegram commands, start restart watcher
 10. run group audit immediately + start periodic 24h audit loop
 
-Matrix startup follows a similar pattern (orchestrator creation, bus wiring, observer startup) but uses matrix-nio's `AsyncClient` sync loop instead of aiogram polling.
+Matrix startup follows a similar pattern (orchestrator creation, bus wiring, observer startup) but uses matrix-nio's `AsyncClient` sync loop instead of aiogram polling. `UpdateObserver` starts only for the main agent on both transports (sub-agents skip it).
 
 ### Orchestrator factory (`orchestrator/lifecycle.py`)
 
@@ -206,6 +206,7 @@ Gemini safeguard:
 - Telegram transport formatting is centralized in `messenger/telegram/transport.py`
 - shared Telegram/message-bus `LockPool` prevents lock drift across middleware and background delivery
 - `ApiServer` currently uses its own `LockPool`, so API locking is isolated from Telegram/message-bus locking
+- Transport-aware delivery: each `Envelope` carries a `transport` field; UNICAST envelopes are routed only to the matching transport, with cascading fallback to other transports when the target is unavailable
 
 ## Callback Query Routing
 

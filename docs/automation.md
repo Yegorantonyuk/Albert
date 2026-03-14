@@ -93,6 +93,8 @@ Runtime behavior:
 6. execute with timeout (`cli_timeout`)
 7. parse output
 8. send result callback to chat when the run actually executes and produces a callback path
+   - routing: UNICAST to originating chat when the job has `chat_id` set; BROADCAST to all users when `chat_id` is zero/unset
+   - if UNICAST delivery fails (e.g. transport unavailable), the bus cascading fallback delivers to an available transport with an explanation
 9. persist status (`last_run_status`, `last_run_at`)
 
 Per-job override fields in `cron_jobs.json`:
@@ -187,6 +189,41 @@ Observer behavior:
 Default ACK token: `HEARTBEAT_OK`.
 
 Default prompt asks the model to review memory + cron context and either send something useful or respond exactly with `HEARTBEAT_OK`.
+
+### Group targets
+
+`group_targets` allows heartbeat to run in specific group chats/topics in addition to private user chats. Each target supports per-target overrides for prompt, ack token, interval, and quiet hours.
+
+```json
+{
+  "heartbeat": {
+    "enabled": true,
+    "interval_minutes": 30,
+    "quiet_start": 21,
+    "quiet_end": 8,
+    "group_targets": [
+      {
+        "chat_id": -1001234567890,
+        "topic_id": 42,
+        "interval_minutes": 60,
+        "prompt": "Check project status and report if anything needs attention.",
+        "quiet_start": 23,
+        "quiet_end": 6
+      },
+      {
+        "chat_id": -1009876543210
+      }
+    ]
+  }
+}
+```
+
+Per-target override fields (all optional, fall back to global heartbeat values when unset):
+
+- `prompt`
+- `ack_token`
+- `interval_minutes`
+- `quiet_start` / `quiet_end`
 
 Lifecycle note:
 
