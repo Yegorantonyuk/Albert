@@ -277,9 +277,10 @@ async def switch_model(
                 update_agent_fields, agents_path, agent_name, **registry_updates
             )
 
+    is_busy = orch.is_chat_busy(key.chat_id, key.topic_id)
     logger.info("Model switch model=%s provider=%s", model_id, orch._config.provider)
 
-    return _build_switch_summary(
+    summary = _build_switch_summary(
         _SwitchSummaryContext(
             old_model=old,
             new_model=model_id,
@@ -292,6 +293,9 @@ async def switch_model(
             resume_message_count=resume_message_count,
         )
     )
+    if is_busy:
+        summary += f"\n\n_{t('model.switched_while_busy')}_"
+    return summary
 
 
 # ---------------------------------------------------------------------------

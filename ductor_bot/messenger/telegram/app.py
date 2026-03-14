@@ -810,18 +810,8 @@ class TelegramBot:
 
         if text_lower.startswith("/model"):
             key = get_session_key(message)
-            is_busy = self._orch.is_chat_busy(chat_id, key.topic_id)
             async with self._sequential.get_lock(key.lock_key):
                 await handle_command(self._orchestrator, self._bot, message)
-            if is_busy:
-                await send_rich(
-                    self._bot,
-                    chat_id,
-                    t("model.switched_while_busy"),
-                    SendRichOpts(
-                        reply_to_message_id=message.message_id, thread_id=get_thread_id(message)
-                    ),
-                )
             return True
 
         await handle_command(self._orchestrator, self._bot, message)
