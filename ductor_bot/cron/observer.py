@@ -216,6 +216,14 @@ class CronObserver(BaseTaskObserver):
                 task_folder=task_folder,
                 timezone=job_timezone,
             )
+            existing = self._scheduled.get(job_id)
+            if (
+                existing is not None
+                and not existing.done()
+                and job_id not in self._executing
+            ):
+                existing.cancel()
+                logger.debug("Cancelled prior idle task for %s", job_id)
             task = asyncio.create_task(
                 self._run_at(delay, scheduled_job),
             )
