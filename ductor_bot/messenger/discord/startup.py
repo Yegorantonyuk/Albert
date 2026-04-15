@@ -1,0 +1,79 @@
+"""Discord-specific startup sequence.
+
+Mirrors ``messenger/matrix/startup.py``: creates the orchestrator, wires
+observers, handles restart sentinel, and fires registered startup hooks.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+from ductor_bot.i18n import t
+from ductor_bot.infra.restart import consume_restart_marker
+
+if TYPE_CHECKING:
+    from ductor_bot.messenger.discord.bot import DiscordBot
+
+logger = logging.getLogger(__name__)
+
+
+async def run_discord_startup(bot: DiscordBot) -> None:
+    """Discord-specific startup: orchestrator, observers, recovery.
+
+    When ``bot._orchestrator`` is already set (secondary transport mode),
+    orchestrator creation and primary-only steps are skipped.
+    """
+    primary = bot._orchestrator is None
+
+    if primary:
+        from ductor_bot.orchestrator.core import Orchestrator
+
+        bot._orchestrator = await Orchestrator.create(bot._config, agent_name=bot._agent_name)
+
+        # Wire all observers + injector to bus in one call.
+        bot._orchestrator.wire_observers_to_bus(bot._bus)
+
+        restart_reason = _consume_restart_sentinel(bot)
+
+        if restart_reason:
+            await bot.notification_service.notify_all(
+                t("startup.discord_restart", reason=restart_reason)
+            )
+
+        # Update checker
+        try:
+            from ductor_bot.infra.install import is_upgradeable
+            from ductor_bot.infra.updater import UpdateObserver
+            from ductor_bot.infra.version import VersionInfo
+
+            if is_upgradeable() and bot._config.update_check and bot._agent_name == "main":
+
+                async def _on_update(info: VersionInfo) -> None:
+                    await bot.notification_service.notify_all(
+                        t("startup.discord_update", version=info.latest)
+                    )
+
+                bot._update_observer = UpdateObserver(notify=_on_update)
+                bot._update_observer.start()
+        except ImportError:
+            pass
+
+    logger.info(
+        "Discord bot online: %s",
+        bot._client.user,
+    )
+
+    for hook in bot._startup_hooks:
+        await hook()
+
+
+def _consume_restart_sentinel(bot: DiscordBot) -> str:
+    """Check and consume the restart marker; return a reason string if found."""
+    paths_obj = bot._orchestrator.paths if bot._orchestrator else None
+    if paths_obj is None:
+        return ""
+    marker_path = paths_obj.ductor_home / "restart-requested"
+    if consume_restart_marker(marker_path=marker_path):
+        return "restart marker"
+    return ""

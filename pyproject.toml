@@ -62,6 +62,9 @@ api = [
 matrix = [
     "matrix-nio>=0.25.0",
 ]
+discord = [
+    "discord.py>=2.3.0",
+]
 dev = ["ductor[test,lint,api,matrix]"]
 
 [project.urls]
@@ -194,6 +197,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["nio.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["discord.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
