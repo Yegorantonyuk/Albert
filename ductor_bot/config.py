@@ -215,6 +215,7 @@ class SceneConfig(BaseModel):
     """Settings for scene indicators and technical footer."""
 
     seen_reaction: bool = False
+    progress_reactions: bool = False
     technical_footer: bool = False
 
 

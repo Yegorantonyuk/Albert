@@ -32,6 +32,16 @@ class BotProtocol(Protocol):
     @property
     def notification_service(self) -> NotificationService: ...
 
+    @property
+    def seen_reaction(self) -> bool:
+        """Whether to send a seen reaction on incoming messages."""
+        ...
+
+    @property
+    def technical_footer(self) -> bool:
+        """Whether to append model/token/cost footer to responses."""
+        ...
+
     async def run(self) -> int:
         """Start the bot event loop. Blocks until shutdown. Returns exit code."""
         ...

@@ -58,6 +58,7 @@ from ductor_bot.messenger.telegram.media import (
 from ductor_bot.messenger.telegram.message_dispatch import (
     NonStreamingDispatch,
     StreamingDispatch,
+    _is_empty_response,
     run_non_streaming_message,
     run_streaming_message,
 )
@@ -269,6 +270,16 @@ class TelegramBot:
     def notification_service(self) -> NotificationService:
         """Transport-agnostic notification interface."""
         return self._notification_service
+
+    @property
+    def seen_reaction(self) -> bool:
+        """Whether to send a seen reaction on incoming messages."""
+        return self._config.scene.seen_reaction
+
+    @property
+    def technical_footer(self) -> bool:
+        """Whether to append model/token/cost footer to responses."""
+        return self._config.scene.technical_footer
 
     def register_startup_hook(self, hook: Callable[[], Awaitable[None]]) -> None:
         """Register a callback to run after bot startup (used by supervisor)."""
@@ -1279,23 +1290,48 @@ class TelegramBot:
         if self._config.scene.seen_reaction:
             await self._set_seen_reaction(message)
 
-        if self._config.streaming.enabled:
-            await self._handle_streaming(message, key, text, thread_id=thread_id)
-        else:
-            await self._handle_non_streaming(message, key, text, thread_id=thread_id)
+        try:
+            if self._config.streaming.enabled:
+                result_text = await self._handle_streaming(message, key, text, thread_id=thread_id)
+            else:
+                result_text = await self._handle_non_streaming(message, key, text, thread_id=thread_id)
+            if self._config.scene.progress_reactions:
+                if _is_empty_response(result_text):
+                    await self._set_reaction(message, "\U0001f631")  # 😱 — no response
+                else:
+                    await self._clear_reaction(message)  # remove reaction when done
+        except Exception:
+            if self._config.scene.progress_reactions:
+                await self._set_reaction(message, "\U0001f631")  # 😱 error
+            raise
 
     async def _set_seen_reaction(self, message: Message) -> None:
         """Set a seen reaction on the user message. Graceful degradation on failure."""
+        await self._set_reaction(message, "\U0001f440")  # 👀
+
+    async def _set_reaction(self, message: Message, emoji: str) -> None:
+        """Update the reaction on a user message. Graceful degradation on failure."""
         try:
             from aiogram.types import ReactionTypeEmoji
 
             await self._bot.set_message_reaction(
                 chat_id=message.chat.id,
                 message_id=message.message_id,
-                reaction=[ReactionTypeEmoji(emoji="\U0001f440")],
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
             )
         except Exception:
-            logger.debug("Failed to set seen reaction", exc_info=True)
+            logger.debug("Failed to set reaction %s", emoji, exc_info=True)
+
+    async def _clear_reaction(self, message: Message) -> None:
+        """Remove all reactions from a user message."""
+        try:
+            await self._bot.set_message_reaction(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                reaction=[],
+            )
+        except Exception:
+            logger.debug("Failed to clear reaction", exc_info=True)
 
     async def _resolve_text(self, message: Message) -> str | None:
         """Extract processable text from *message* (plain text or media prompt)."""
@@ -1325,9 +1361,14 @@ class TelegramBot:
 
     async def _handle_streaming(
         self, message: Message, key: SessionKey, text: str, *, thread_id: int | None = None
-    ) -> None:
+    ) -> str:
         """Streaming flow: coalescer -> stream editor -> Telegram."""
-        await run_streaming_message(
+        on_tool_reaction = None
+        if self._config.scene.progress_reactions:
+            async def on_tool_reaction() -> None:
+                await self._set_reaction(message, "\u270d\ufe0f")  # ✍️
+
+        return await run_streaming_message(
             StreamingDispatch(
                 bot=self._bot,
                 orchestrator=self._orch,
@@ -1338,6 +1379,7 @@ class TelegramBot:
                 allowed_roots=self.file_roots(self._orch.paths),
                 thread_id=thread_id,
                 scene_config=self._config.scene,
+                on_tool_reaction=on_tool_reaction,
             ),
         )
 
@@ -1348,9 +1390,9 @@ class TelegramBot:
         text: str,
         *,
         thread_id: int | None = None,
-    ) -> None:
+    ) -> str:
         """Non-streaming flow: one-shot orchestrator call -> Telegram delivery."""
-        await run_non_streaming_message(
+        return await run_non_streaming_message(
             NonStreamingDispatch(
                 bot=self._bot,
                 orchestrator=self._orch,

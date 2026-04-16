@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 InstallMode = Literal["pipx", "pip", "dev"]
 
-_PACKAGE_NAME = "ductor"
+_PACKAGE_NAME = "albert"
 
 
 def detect_install_mode() -> InstallMode:

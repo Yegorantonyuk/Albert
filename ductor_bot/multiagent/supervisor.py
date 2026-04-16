@@ -77,6 +77,8 @@ class AgentSupervisor:
         self._tasks: dict[str, asyncio.Task[int]] = {}
         self._health: dict[str, AgentHealth] = {}
         self._watcher = FileWatcher(self._agents_path, self._on_agents_changed)
+        self._config_path = self._main_paths.ductor_home / "config" / "config.json"
+        self._config_watcher = FileWatcher(self._config_path, self._on_config_changed)
         self._running = False
         self._main_done: asyncio.Event = asyncio.Event()
         self._main_ready: asyncio.Event = asyncio.Event()
@@ -188,8 +190,9 @@ class AgentSupervisor:
         self._shared_knowledge = SharedKnowledgeSync(shared_path, self)
         await self._shared_knowledge.start()
 
-        # 5. Start FileWatcher for agents.json
+        # 5. Start FileWatcher for agents.json and config.json
         await self._watcher.start()
+        await self._config_watcher.start()
 
         # 6. Wait for main agent to finish — it determines the exit code
         await self._main_done.wait()
@@ -525,7 +528,47 @@ class AgentSupervisor:
         await self._start_sub_agent(match)
         return f"Agent '{name}' restarted."
 
-    # -- FileWatcher callback -----------------------------------------------
+    # -- FileWatcher callbacks ----------------------------------------------
+
+    async def _on_config_changed(self) -> None:
+        """Called when config.json mtime changes.
+
+        Only trigger a full restart when non-hot-reloadable fields changed.
+        Hot-reloadable fields (model, provider, etc.) are handled by each
+        agent's ``ConfigReloader`` — no restart needed for those.
+        """
+        import json
+
+        from ductor_bot.config_reload import diff_configs, classify_changes
+
+        try:
+            raw = self._config_path.read_text(encoding="utf-8")
+            new_config = AgentConfig(**json.loads(raw))
+        except Exception:
+            logger.warning("config.json changed but failed to parse — skipping restart")
+            return
+
+        changes = diff_configs(self._main_config, new_config)
+        if not changes:
+            logger.debug("config.json mtime changed but no field differences — ignoring")
+            return
+
+        _hot, restart_fields = classify_changes(changes)
+        if not restart_fields:
+            logger.info(
+                "config.json changed (hot-reloadable only: %s) — no restart needed",
+                ", ".join(sorted(changes)),
+            )
+            return
+
+        from ductor_bot.infra.restart import write_restart_marker
+
+        logger.info(
+            "config.json changed (restart-required fields: %s) — triggering auto-restart",
+            ", ".join(restart_fields),
+        )
+        marker = self._main_paths.ductor_home / "restart-requested"
+        write_restart_marker(marker_path=marker)
 
     async def _on_agents_changed(self) -> None:
         """Called when agents.json mtime changes. Sync running agents."""
@@ -627,6 +670,7 @@ class AgentSupervisor:
         """Shut down all agents and cleanup."""
         self._running = False
         await self._watcher.stop()
+        await self._config_watcher.stop()
         if self._shared_knowledge:
             await self._shared_knowledge.stop()
 

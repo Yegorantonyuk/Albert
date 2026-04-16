@@ -85,6 +85,16 @@ class MultiBotAdapter:
     def notification_service(self) -> NotificationService:
         return self._notification_service
 
+    @property
+    def seen_reaction(self) -> bool:
+        """Whether to send a seen reaction on incoming messages."""
+        return self._primary.seen_reaction
+
+    @property
+    def technical_footer(self) -> bool:
+        """Whether to append model/token/cost footer to responses."""
+        return self._primary.technical_footer
+
     # -- BotProtocol: methods delegated to primary -----------------------------
 
     def register_startup_hook(self, hook: Callable[[], Awaitable[None]]) -> None:

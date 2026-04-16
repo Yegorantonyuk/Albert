@@ -184,6 +184,14 @@ async def run_bot(config: AgentConfig) -> int:
 
     acquire_lock(pid_file=paths.ductor_home / "bot.pid", kill_existing=True)
 
+    # Sync all existing sessions to the current global model/provider.
+    # This ensures that a config.json model change takes effect immediately
+    # on the next message without any manual session edits.
+    from ductor_bot.session import SessionManager
+
+    _sessions_mgr = SessionManager(paths.sessions_path, config)
+    await _sessions_mgr.sync_model_to_config(config.model, config.provider)
+
     supervisor = AgentSupervisor(config)
     exit_code = 0
     loop = asyncio.get_running_loop()

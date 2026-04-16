@@ -590,6 +590,25 @@ class SessionManager:
         logger.debug("Session fresh check: fresh=yes reason=still_valid")
         return True
 
+    async def sync_model_to_config(self, model: str, provider: str) -> int:
+        """Update all sessions to match the current global config model/provider.
+
+        Called on startup so that a config.json model change takes effect
+        immediately for all existing sessions without manual edits.
+        Returns the number of sessions updated.
+        """
+        sessions = await self._load()
+        changed = 0
+        for sd in sessions.values():
+            if sd.model != model or sd.provider != provider:
+                sd.model = model
+                sd.provider = provider
+                changed += 1
+        if changed:
+            await self._save(sessions)
+            logger.info("sync_model_to_config: updated %d session(s) to model=%s", changed, model)
+        return changed
+
     async def _load(self) -> dict[str, SessionData]:
         """Load sessions from JSON file.
 

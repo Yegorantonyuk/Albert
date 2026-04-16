@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,24 @@ class StreamingDispatch:
     allowed_roots: list[Path] | None
     thread_id: int | None = None
     scene_config: SceneConfig | None = None
+    on_tool_reaction: Callable[[], Awaitable[None]] | None = field(default=None)
+
+
+_NO_RESPONSE_PATTERNS = frozenset(
+    {
+        "no response requested",
+        "no response needed",
+        "nothing to do",
+        "no action needed",
+        "no action required",
+    }
+)
+
+
+def _is_empty_response(text: str) -> bool:
+    """Return True if the model produced no useful output."""
+    stripped = text.strip().rstrip(".").lower()
+    return not stripped or stripped in _NO_RESPONSE_PATTERNS
 
 
 async def run_non_streaming_message(
@@ -81,6 +100,9 @@ async def run_non_streaming_message(
 
     footer = _build_footer(result, dispatch.scene_config)
     result.text += footer
+    if _is_empty_response(result.text):
+        logger.warning("Empty or no-op response from model, sending fallback")
+        result.text = "_(error: no response from model — please try again)_"
     reply_id = dispatch.reply_to.message_id if dispatch.reply_to else None
     await send_rich(
         dispatch.bot,
@@ -124,6 +146,8 @@ async def run_streaming_message(
     async def on_tool(tool_name: str) -> None:
         await coalescer.flush(force=True)
         await editor.append_tool(tool_name)
+        if dispatch.on_tool_reaction is not None:
+            await dispatch.on_tool_reaction()
 
     async def on_system(status: str | None) -> None:
         system_map: dict[str, str] = {
@@ -161,6 +185,10 @@ async def run_streaming_message(
         result.stream_fallback,
         editor.has_content,
     )
+
+    if _is_empty_response(result.text):
+        logger.warning("Empty or no-op response from model, sending fallback")
+        result.text = "_(error: no response from model — please try again)_"
 
     if result.stream_fallback or not editor.has_content:
         await send_rich(

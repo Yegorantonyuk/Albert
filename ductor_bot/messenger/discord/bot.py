@@ -283,6 +283,16 @@ class DiscordBot:
     def notification_service(self) -> NotificationService:
         return self._notification_service
 
+    @property
+    def seen_reaction(self) -> bool:
+        """Whether to send a seen reaction on incoming messages."""
+        return self._config.scene.seen_reaction
+
+    @property
+    def technical_footer(self) -> bool:
+        """Whether to append model/token/cost footer to responses."""
+        return self._config.scene.technical_footer
+
     def register_startup_hook(self, hook: Callable[[], Awaitable[None]]) -> None:
         self._startup_hooks.append(hook)
 

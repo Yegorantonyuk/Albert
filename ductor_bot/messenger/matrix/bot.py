@@ -164,6 +164,16 @@ class MatrixBot:
         return self._notification_service
 
     @property
+    def seen_reaction(self) -> bool:
+        """Whether to send a seen reaction on incoming messages."""
+        return self._config.scene.seen_reaction
+
+    @property
+    def technical_footer(self) -> bool:
+        """Whether to append model/token/cost footer to responses."""
+        return self._config.scene.technical_footer
+
+    @property
     def client(self) -> AsyncClient:
         """The nio AsyncClient instance."""
         return self._client
