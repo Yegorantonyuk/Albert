@@ -145,6 +145,20 @@
         "technical_footer": false
     },
 
+    "notifications": {
+        "startup_targets": [
+            {"enabled": false, "chat_id": null, "topic_id": null}
+        ],
+        "upgrade_targets": [
+            {"enabled": false, "chat_id": null, "topic_id": null}
+        ]
+    },
+
+    "transcription": {
+        "audio_command": "",
+        "video_command": ""
+    },
+
     "timeouts": {
         "normal": 600.0,
         "background": 1800.0,

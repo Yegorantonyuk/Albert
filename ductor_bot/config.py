@@ -281,6 +281,45 @@ class WebhookConfig(BaseModel):
     rate_limit_per_minute: int = 30
 
 
+class TranscriptionConfig(BaseModel):
+    """External transcription hooks for audio + video (#66).
+
+    Empty strings preserve the built-in strategies in the bundled tool
+    scripts (OpenAI Whisper API → local whisper CLI → whisper.cpp).
+    When a value is set, the bot exports it via
+    ``DUCTOR_TRANSCRIBE_COMMAND`` / ``DUCTOR_VIDEO_TRANSCRIBE_COMMAND``
+    and the tool script invokes the external command first (falling
+    back to the built-ins on failure).
+    """
+
+    audio_command: str = ""
+    video_command: str = ""
+
+
+class NotificationTarget(BaseModel):
+    """A chat/topic to route startup or upgrade notifications to (#64).
+
+    ``topic_id`` is Telegram-specific (forum-topic thread). Matrix ignores it.
+    """
+
+    enabled: bool = True
+    chat_id: int | None = None
+    topic_id: int | None = None
+
+
+class NotificationsConfig(BaseModel):
+    """Opt-in routing for lifecycle notifications (#64).
+
+    Empty lists preserve the previous fan-out-to-all behaviour. When
+    ``startup_targets`` has at least one enabled target with a valid
+    ``chat_id``, startup notices go to those targets only; same for
+    ``upgrade_targets`` and new-version notices.
+    """
+
+    startup_targets: list[NotificationTarget] = Field(default_factory=list)
+    upgrade_targets: list[NotificationTarget] = Field(default_factory=list)
+
+
 class SceneConfig(BaseModel):
     """Settings for scene indicators and technical footer."""
 
@@ -410,6 +449,8 @@ class AgentConfig(BaseModel):
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     tasks: TasksConfig = Field(default_factory=TasksConfig)
     scene: SceneConfig = Field(default_factory=SceneConfig)
+    notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     user_timezone: str = ""
     language: str = "en"
     update_check: bool = True
