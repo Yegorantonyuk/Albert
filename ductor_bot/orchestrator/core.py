@@ -475,6 +475,10 @@ class Orchestrator:
         """Wire all observer result callbacks to the message bus."""
         self._observers.wire_to_bus(bus, wake_handler=wake_handler)
         bus.set_injector(self)
+        # Share the bus lock pool with MemoryFlusher so silent flush / compact
+        # turns serialize against concurrent user turns on the same SessionKey.
+        if self._memory_flusher is not None:
+            self._memory_flusher.set_lock_pool(bus.lock_pool)
 
     async def handle_heartbeat(
         self,

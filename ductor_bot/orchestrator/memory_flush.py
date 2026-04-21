@@ -19,8 +19,10 @@ Design notes:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
+from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.types import AgentRequest
@@ -28,6 +30,7 @@ from ductor_bot.errors import CLIError
 from ductor_bot.workspace.loader import read_mainmemory
 
 if TYPE_CHECKING:
+    from ductor_bot.bus.lock_pool import LockPool
     from ductor_bot.cli.service import CLIService
     from ductor_bot.config import MemoryCompactionConfig, MemoryFlushConfig
     from ductor_bot.session import SessionKey
@@ -46,13 +49,30 @@ class MemoryFlusher:
         cli_service: CLIService,
         compaction_config: MemoryCompactionConfig,
         paths: DuctorPaths,
+        *,
+        lock_pool: LockPool | None = None,
     ) -> None:
         self._config = config
         self._cli = cli_service
         self._compaction = compaction_config
         self._paths = paths
+        self._lock_pool = lock_pool
         self._boundary_seen: set[SessionKey] = set()
         self._last_flushed: dict[SessionKey, float] = {}
+
+    def set_lock_pool(self, lock_pool: LockPool) -> None:
+        """Attach the shared ``LockPool`` after construction (late wiring)."""
+        self._lock_pool = lock_pool
+
+    def _session_lock(self, key: SessionKey) -> AbstractAsyncContextManager[object]:
+        """Return an async context manager for the per-session lock.
+
+        Falls back to ``nullcontext`` when no ``LockPool`` is attached so
+        ``MemoryFlusher`` remains usable unlocked (e.g. in unit tests).
+        """
+        if self._lock_pool is None:
+            return contextlib.nullcontext()
+        return self._lock_pool.get(key.lock_key)
 
     def mark_boundary(self, key: SessionKey) -> None:
         """Record that a CompactBoundaryEvent was seen for this session."""
@@ -101,7 +121,8 @@ class MemoryFlusher:
         )
         logger.info("Memory flush firing chat=%d session=%s", key.chat_id, session_id[:8])
         try:
-            await self._cli.execute(request)
+            async with self._session_lock(key):
+                await self._cli.execute(request)
         except (CLIError, RuntimeError, OSError) as exc:
             logger.warning("Memory flush failed chat=%d: %s", key.chat_id, exc)
         finally:
@@ -135,6 +156,7 @@ class MemoryFlusher:
             session_id[:8],
         )
         try:
-            await self._cli.execute(request)
+            async with self._session_lock(key):
+                await self._cli.execute(request)
         except (CLIError, RuntimeError, OSError) as exc:
             logger.warning("Memory compaction failed chat=%d: %s", key.chat_id, exc)
