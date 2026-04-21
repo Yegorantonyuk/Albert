@@ -396,11 +396,17 @@ async def normal_streaming(
     _begin_inflight(orch, request, session, is_recovery=False)
     try:
         cb = cbs or StreamingCallbacks()
+
+        async def _on_compact() -> None:
+            if orch._memory_flusher is not None:
+                orch._memory_flusher.mark_boundary(key)
+
         response = await orch._cli_service.execute_streaming(
             request,
             on_text_delta=cb.on_text_delta,
             on_tool_activity=cb.on_tool_activity,
             on_system_status=cb.on_system_status,
+            on_compact_boundary=_on_compact if orch._memory_flusher is not None else None,
         )
         _reg = orch._process_registry
         if (
@@ -432,6 +438,8 @@ async def normal_streaming(
                 cli_detail=response.result,
             )
         await _update_session(orch, session, response)
+        if orch._memory_flusher is not None:
+            await orch._memory_flusher.maybe_flush(key, session)
         logger.info("Streaming flow completed")
         req_model, _prov = _request_target(orch, request)
         return _finish_normal(

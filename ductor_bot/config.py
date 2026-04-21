@@ -86,6 +86,15 @@ _DEFAULT_HEARTBEAT_PROMPT = (
 
 _DEFAULT_HEARTBEAT_ACK = "HEARTBEAT_OK"
 
+_DEFAULT_FLUSH_PROMPT = (
+    "## PRE-COMPACTION MEMORY FLUSH\n"
+    "The conversation context is about to be compacted. Before that happens: "
+    "review the recent conversation and APPEND any durable facts, decisions, "
+    "preferences, or learnings to memory_system/MAINMEMORY.md that are not "
+    "already captured there. Do NOT overwrite existing entries. If there is "
+    "nothing new worth saving, reply exactly: FLUSH_NOOP"
+)
+
 
 class HeartbeatTarget(BaseModel):
     """A specific chat/topic to send heartbeat checks to.
@@ -141,6 +150,14 @@ class CleanupConfig(BaseModel):
         elif "telegram_files_days" in data:
             data.pop("telegram_files_days")
         super().__init__(**data)
+
+
+class MemoryFlushConfig(BaseModel):
+    """Settings for the pre-compaction silent memory flush (#77)."""
+
+    enabled: bool = True
+    flush_prompt: str = _DEFAULT_FLUSH_PROMPT
+    dedup_seconds: int = 300
 
 
 class ImageConfig(BaseModel):
@@ -330,6 +347,7 @@ class AgentConfig(BaseModel):
     docker: DockerConfig = Field(default_factory=DockerConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
+    memory_flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig)
     webhooks: WebhookConfig = Field(default_factory=WebhookConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

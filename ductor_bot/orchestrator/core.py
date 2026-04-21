@@ -52,6 +52,7 @@ from ductor_bot.orchestrator.hooks import (
     MAINMEMORY_REMINDER,
     MessageHookRegistry,
 )
+from ductor_bot.orchestrator.memory_flush import MemoryFlusher
 from ductor_bot.orchestrator.observers import ObserverManager
 from ductor_bot.orchestrator.providers import ProviderManager
 from ductor_bot.orchestrator.registry import CommandRegistry, OrchestratorResult
@@ -174,6 +175,11 @@ class Orchestrator:
         self._api_stop: Callable[[], Awaitable[None]] | None = None
         self._gateway_stop: Callable[[], Awaitable[None]] | None = None
         self._inflight_tracker = InflightTracker(paths.inflight_turns_path)
+        self._memory_flusher: MemoryFlusher | None = (
+            MemoryFlusher(config.memory_flush, self._cli_service)
+            if config.memory_flush.enabled
+            else None
+        )
         self._hook_registry = MessageHookRegistry()
         self._hook_registry.register(MAINMEMORY_REMINDER)
         self._hook_registry.register(DELEGATION_BRIEF)
