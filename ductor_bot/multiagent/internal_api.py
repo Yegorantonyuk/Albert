@@ -255,7 +255,7 @@ class InternalAgentAPI:
                 status=400,
             )
 
-        from ductor_bot.tasks.models import TaskSubmit
+        from ductor_bot.tasks.models import TaskSubmit, normalise_priority
 
         submit = TaskSubmit(
             chat_id=data.get("chat_id", 0),
@@ -267,6 +267,7 @@ class InternalAgentAPI:
             provider_override=data.get("provider") or "",
             model_override=data.get("model") or "",
             thinking_override=data.get("thinking") or "",
+            priority=normalise_priority(data.get("priority")),
         )
 
         try:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ductor_bot.infra.json_store import atomic_json_save, load_json
-from ductor_bot.tasks.models import TaskEntry, TaskSubmit
+from ductor_bot.tasks.models import TaskEntry, TaskSubmit, normalise_priority
 
 logger = logging.getLogger(__name__)
 
@@ -93,17 +93,20 @@ class TaskRegistry:
         }
         atomic_json_save(self._path, data)
 
-    def create(
+    def create(  # noqa: PLR0913  -- task entry fields have natural multi-arity
         self,
         submit: TaskSubmit,
         provider: str,
         model: str,
+        *,
         thinking: str = "",
         tasks_dir: Path | None = None,
+        priority: str = "",
     ) -> TaskEntry:
         """Create a new task entry and persist it.
 
         *tasks_dir* overrides the default tasks directory (for per-agent isolation).
+        *priority* is coerced via ``normalise_priority`` (unknown ⇒ background).
         """
         task_id = secrets.token_hex(4)
         resolved_dir = tasks_dir or self._tasks_dir
@@ -120,6 +123,7 @@ class TaskRegistry:
             thinking=thinking,
             tasks_dir=str(resolved_dir),
             thread_id=submit.thread_id,
+            priority=normalise_priority(priority or submit.priority),
         )
         self._entries[task_id] = entry
 

@@ -9,7 +9,13 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
-from ductor_bot.tasks.models import TaskEntry, TaskInFlight, TaskResult, TaskSubmit
+from ductor_bot.tasks.models import (
+    TaskEntry,
+    TaskInFlight,
+    TaskResult,
+    TaskSubmit,
+    normalise_priority,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -133,14 +139,23 @@ class TaskHub:
             if resolved:
                 submit.chat_id = resolved
 
-        active = sum(
-            1
-            for t in self._in_flight.values()
-            if t.entry.chat_id == submit.chat_id and t.asyncio_task and not t.asyncio_task.done()
-        )
-        if active >= self._config.max_parallel:
-            msg = f"Too many background tasks ({self._config.max_parallel} max)"
-            raise ValueError(msg)
+        # #79: interactive tasks bypass the per-chat concurrency cap so
+        # direct user follow-ups stay responsive under heavy batch load.
+        # Active count excludes already-running interactive tasks for the
+        # same reason — they never "fill up" the cap for background work.
+        priority = normalise_priority(submit.priority)
+        if priority != "interactive":
+            active = sum(
+                1
+                for t in self._in_flight.values()
+                if t.entry.chat_id == submit.chat_id
+                and t.asyncio_task
+                and not t.asyncio_task.done()
+                and t.entry.priority != "interactive"
+            )
+            if active >= self._config.max_parallel:
+                msg = f"Too many background tasks ({self._config.max_parallel} max)"
+                raise ValueError(msg)
 
         provider = submit.provider_override or ""
         model = submit.model_override or ""
@@ -149,7 +164,12 @@ class TaskHub:
         # Resolve per-agent tasks_dir for folder isolation
         agent_tasks_dir = self._agent_tasks_dirs.get(submit.parent_agent)
         entry = self._registry.create(
-            submit, provider, model, thinking=thinking, tasks_dir=agent_tasks_dir
+            submit,
+            provider,
+            model,
+            thinking=thinking,
+            tasks_dir=agent_tasks_dir,
+            priority=priority,
         )
 
         # Build prompt with mandatory suffix
