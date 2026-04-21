@@ -178,14 +178,16 @@ class MemoryFlushConfig(BaseModel):
 
     enabled: bool = True
     flush_prompt: str = _DEFAULT_FLUSH_PROMPT
-    dedup_seconds: int = 300
+    # ``0`` disables the dedup window (flush fires on every boundary).
+    dedup_seconds: int = Field(default=300, ge=0)
 
 
 class MemoryReflectionConfig(BaseModel):
     """Settings for the periodic memory reflection hook (#65)."""
 
     enabled: bool = False
-    every_n_messages: int = 10
+    # Must be >= 1 to avoid ``ZeroDivisionError`` in modulo check (hooks.py).
+    every_n_messages: int = Field(default=10, ge=1)
     prompt: str = _DEFAULT_MEMORY_REFLECTION_PROMPT
 
 
@@ -193,10 +195,21 @@ class MemoryCompactionConfig(BaseModel):
     """Settings for LLM-driven memory compaction (#80)."""
 
     enabled: bool = True
-    trigger_lines: int = 70
-    target_lines: int = 40
-    preserve_recency_days: int = 14
+    trigger_lines: int = Field(default=70, ge=1)
+    target_lines: int = Field(default=40, ge=1)
+    # ``0`` disables the "preserve recent entries verbatim" guard.
+    preserve_recency_days: int = Field(default=14, ge=0)
     prompt: str = _DEFAULT_COMPACT_PROMPT
+
+    @model_validator(mode="after")
+    def _check_target_le_trigger(self) -> MemoryCompactionConfig:
+        """``target_lines`` must not exceed ``trigger_lines`` (compaction would be a no-op)."""
+        if self.target_lines > self.trigger_lines:
+            raise ValueError(
+                f"target_lines ({self.target_lines}) must be <= "
+                f"trigger_lines ({self.trigger_lines})"
+            )
+        return self
 
 
 class ImageConfig(BaseModel):
