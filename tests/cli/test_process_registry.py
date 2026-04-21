@@ -235,6 +235,49 @@ async def test_kill_for_task_unregisters_killed_entry() -> None:
     assert 1 not in reg._processes
 
 
+async def test_kill_for_task_concurrent_register_is_safe() -> None:
+    """MED #9: racing register() vs kill_for_task() must not crash.
+
+    With the kill-lock in place, kill_for_task() takes an atomic snapshot
+    of its targets; a new register that lands mid-kill either makes it into
+    that snapshot or belongs to the next round — it never orphans the
+    subprocess and never raises.
+    """
+    reg = ProcessRegistry()
+
+    # Pre-existing target that kill_for_task will find in its snapshot.
+    first = _mock_process(pid=200)
+    reg.register(chat_id=1, process=first, label="task:XXXXXXXX")
+
+    # Racing process that tries to register under the same label.
+    racing = _mock_process(pid=201)
+
+    async def _racing_register() -> None:
+        # Yield a few times so register has a chance to interleave with
+        # kill_for_task's await points.
+        for _ in range(3):
+            await asyncio.sleep(0)
+        reg.register(chat_id=1, process=racing, label="task:XXXXXXXX")
+
+    with patch(
+        "ductor_bot.cli.process_registry._kill_processes",
+        new_callable=AsyncMock,
+        return_value=1,
+    ):
+        killed, _ = await asyncio.gather(
+            reg.kill_for_task("XXXXXXXX"),
+            _racing_register(),
+        )
+
+    # kill_for_task found and killed the pre-existing target cleanly.
+    assert killed == 1
+    # The racing registration either was swept by the same kill (0 left)
+    # or survived for the next round (<=1 left). Both are acceptable — the
+    # invariant is: no crash, no exception, registry is consistent.
+    remaining = reg._processes.get(1, [])
+    assert len(remaining) <= 1
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX sleep binary")
 async def test_kill_for_task_kills_real_subprocess() -> None:
     """REAL-subprocess regression test for #92 — mock-only suite cannot catch this bug class.
