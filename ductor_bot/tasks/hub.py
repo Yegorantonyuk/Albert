@@ -673,6 +673,22 @@ def _append_taskmemory(result_text: str, taskmemory_path: Path) -> str:
         return result_text
 
     if len(content) > _TASKMEMORY_MAX_LEN:
-        content = content[:_TASKMEMORY_MAX_LEN] + "\n[... truncated]"
+        # #91: make truncation visible -- silent truncation hid detailed
+        # research findings from the parent agent. Log a WARNING (for operators)
+        # AND emit a suffix that tells the parent agent the original length
+        # and the full file path so it can read the complete content on demand.
+        original_len = len(content)
+        logger.warning(
+            "TASKMEMORY truncated at %s: %d chars -> %d chars "
+            "(parent agent sees 'full content at' hint)",
+            taskmemory_path,
+            original_len,
+            _TASKMEMORY_MAX_LEN,
+        )
+        content = (
+            content[:_TASKMEMORY_MAX_LEN]
+            + f"\n[... truncated -- original was {original_len} chars. "
+            + f"Full content at: {taskmemory_path}]"
+        )
 
     return f"{result_text}\n\n---\nCONTENT FROM TASKMEMORY.MD ({taskmemory_path}):\n\n{content}"

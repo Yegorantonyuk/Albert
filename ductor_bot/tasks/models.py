@@ -72,6 +72,11 @@ class TaskEntry:
             "parent_agent": self.parent_agent,
             "name": self.name,
             "prompt_preview": self.prompt_preview,
+            # #90: original_prompt MUST round-trip so that a restart mid-task
+            # preserves the full prompt for resume/retry and for the parent
+            # agent's "Original task: <prompt>" injection. prompt_preview
+            # (80 chars) alone is too short.
+            "original_prompt": self.original_prompt,
             "provider": self.provider,
             "model": self.model,
             "status": self.status,
@@ -112,6 +117,9 @@ class TaskEntry:
             question_count=d.get("question_count", 0),
             num_turns=d.get("num_turns", 0),
             last_question=d.get("last_question", ""),
+            # #90: .get(..., "") default preserves backward-compat for tasks.json
+            # files written before the original_prompt field was persisted.
+            original_prompt=d.get("original_prompt", ""),
             thinking=d.get("thinking", ""),
             tasks_dir=d.get("tasks_dir", ""),
             thread_id=d.get("thread_id"),
