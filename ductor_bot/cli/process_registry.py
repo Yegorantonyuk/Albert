@@ -194,6 +194,29 @@ class ProcessRegistry:
             self.unregister(tracked)
         return killed
 
+    async def kill_for_task(self, task_id: str) -> int:
+        """Kill any tracked process labelled ``f'task:{task_id}'``. Returns count killed.
+
+        Mirrors :meth:`kill_stale` semantics but filters by label. Uses the
+        SIGTERM → 2s → SIGKILL ladder via :func:`_kill_processes`. Already-exited
+        processes are skipped (``returncode is not None``). Each killed entry is
+        unregistered after the ladder completes.
+        """
+        label = f"task:{task_id}"
+        targets: list[TrackedProcess] = []
+        for entries in self._processes.values():
+            for tracked in entries:
+                if tracked.process.returncode is not None:
+                    continue
+                if tracked.label == label:
+                    targets.append(tracked)
+        if not targets:
+            return 0
+        killed = await _kill_processes(targets)
+        for tracked in targets:
+            self.unregister(tracked)
+        return killed
+
 
 def _send_sigterm(entries: list[TrackedProcess]) -> int:
     """Terminate all live processes. Returns count signalled."""

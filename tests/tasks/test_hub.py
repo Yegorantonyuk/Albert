@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.tasks.hub import TaskHub
 from ductor_bot.tasks.models import TaskResult, TaskSubmit
 from ductor_bot.tasks.registry import TaskRegistry
@@ -266,6 +267,125 @@ class TestCancel:
             config=_make_config(),
         )
         assert not await hub.cancel("nonexistent")
+
+
+class TestCancelWithProcessRegistry:
+    """#92: cancel/cancel_all must kill the subprocess BEFORE the asyncio task
+    (otherwise cli.execute's pipe stays open and CancelledError cannot propagate).
+    """
+
+    async def test_cancel_kills_subprocess_before_asyncio_cancel(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """cancel() must invoke process_registry.kill_for_task BEFORE asyncio_task.cancel()."""
+        order: list[str] = []
+
+        process_registry = AsyncMock(spec=ProcessRegistry)
+
+        async def _record_kill(_task_id: str) -> int:
+            order.append("kill_for_task")
+            return 1
+
+        process_registry.kill_for_task.side_effect = _record_kill
+
+        # cli.execute hangs so the task stays in-flight until cancelled.
+        async def _hang(_: object) -> MagicMock:
+            try:
+                await asyncio.sleep(999)
+            except asyncio.CancelledError:
+                order.append("asyncio_cancel")
+                raise
+            return MagicMock()  # never reached
+
+        cli = _make_cli_service()
+        cli.execute = AsyncMock(side_effect=_hang)
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+            process_registry=process_registry,
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        task_id = hub.submit(_submit())
+        await asyncio.sleep(0.05)  # let the task actually start awaiting the pipe
+
+        success = await hub.cancel(task_id)
+        assert success
+
+        process_registry.kill_for_task.assert_awaited_once_with(task_id)
+        # Kill-order invariant: subprocess kill strictly precedes asyncio cancel.
+        assert order == ["kill_for_task", "asyncio_cancel"], (
+            f"expected kill-before-cancel, got {order!r}"
+        )
+
+    async def test_cancel_all_kills_each_tasks_subprocess(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """cancel_all() must call kill_for_task once per in-flight task for the chat."""
+        process_registry = AsyncMock(spec=ProcessRegistry)
+        process_registry.kill_for_task.return_value = 1
+
+        async def _hang(_: object) -> MagicMock:
+            await asyncio.sleep(999)
+            return MagicMock()
+
+        cli = _make_cli_service()
+        cli.execute = AsyncMock(side_effect=_hang)
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+            process_registry=process_registry,
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        task_id_a = hub.submit(_submit(name="A"))
+        task_id_b = hub.submit(_submit(name="B"))
+        await asyncio.sleep(0.05)
+
+        count = await hub.cancel_all(42)
+        assert count == 2
+        assert process_registry.kill_for_task.await_count == 2
+        awaited_ids = {c.args[0] for c in process_registry.kill_for_task.await_args_list}
+        assert awaited_ids == {task_id_a, task_id_b}
+
+    async def test_cancel_is_noop_when_process_registry_is_none(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """Without a process_registry the old behavior is preserved (asyncio cancel only)."""
+        cancel_recorded = asyncio.Event()
+
+        async def _hang(_: object) -> MagicMock:
+            try:
+                await asyncio.sleep(999)
+            except asyncio.CancelledError:
+                cancel_recorded.set()
+                raise
+            return MagicMock()
+
+        cli = _make_cli_service()
+        cli.execute = AsyncMock(side_effect=_hang)
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+            # NOTE: no process_registry kwarg — backward compat path.
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        task_id = hub.submit(_submit())
+        await asyncio.sleep(0.05)
+
+        success = await hub.cancel(task_id)
+        assert success
+        assert cancel_recorded.is_set(), "asyncio_task.cancel() must still fire with no registry"
 
 
 class TestForwardQuestion:
