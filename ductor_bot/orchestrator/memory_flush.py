@@ -139,10 +139,7 @@ class MemoryFlusher:
             )
             return
 
-        prompt = self._compaction.prompt.format(
-            target_lines=self._compaction.target_lines,
-            preserve_days=self._compaction.preserve_recency_days,
-        )
+        prompt = self._render_compact_prompt()
         request = AgentRequest(
             prompt=prompt,
             chat_id=key.chat_id,
@@ -160,3 +157,28 @@ class MemoryFlusher:
                 await self._cli.execute(request)
         except (CLIError, RuntimeError, OSError) as exc:
             logger.warning("Memory compaction failed chat=%d: %s", key.chat_id, exc)
+
+    def _render_compact_prompt(self) -> str:
+        """Render the compaction prompt, falling back to the default on typo errors.
+
+        A user-configured template with an unknown ``{placeholder}`` (e.g. a
+        typo like ``{preserv_days}``) must never suppress the real user turn.
+        """
+        fmt_kwargs = {
+            "target_lines": self._compaction.target_lines,
+            "preserve_days": self._compaction.preserve_recency_days,
+        }
+        try:
+            return self._compaction.prompt.format(**fmt_kwargs)
+        except (KeyError, IndexError) as exc:
+            # Import locally: MemoryCompactionConfig is TYPE_CHECKING-only at module scope.
+            from ductor_bot.config import MemoryCompactionConfig
+
+            logger.warning(
+                "Memory compaction prompt template has invalid placeholder (%s); "
+                "falling back to default template.",
+                exc,
+            )
+            default_prompt = MemoryCompactionConfig.model_fields["prompt"].default
+            assert isinstance(default_prompt, str)
+            return default_prompt.format(**fmt_kwargs)
