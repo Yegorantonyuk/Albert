@@ -503,17 +503,9 @@ class TaskHub:
             response = await cli.execute(request)
 
             elapsed = time.monotonic() - t0
-            if response.timed_out:
-                status = "failed"
-                error = f"Timeout after {timeout:.0f}s"
-            elif response.is_error:
-                status = "failed"
-                error = response.result or "CLI error"
-            else:
-                # If the task asked a question during this run, mark as waiting
-                inflight = self._in_flight.get(entry.task_id)
-                status = "waiting" if inflight and inflight.has_pending_question else "done"
-                error = ""
+            inflight = self._in_flight.get(entry.task_id)
+            has_pending = bool(inflight and inflight.has_pending_question)
+            status, error = _classify_task_response(response, timeout, has_pending)
 
             # Accumulate turns (resume adds to previous count)
             total_turns = entry.num_turns + response.num_turns
@@ -658,6 +650,28 @@ class TaskHub:
 
 _RESULT_PREVIEW_LEN = 200
 _TASKMEMORY_MAX_LEN = 4000
+# Exit codes that map to user-initiated cancel (SIGTERM=15, SIGKILL=9).
+# Subprocess module reports these as 128+signal (143/137) or negative signal (-15/-9).
+_CANCEL_RETURNCODES = frozenset({143, 137, -15, -9})
+
+
+def _classify_task_response(
+    response: object, timeout: float, has_pending_question: bool
+) -> tuple[str, str]:
+    """Map a CLIResponse to (status, error_message) for the task registry.
+
+    Exit 143/137 (= 128 + SIGTERM/SIGKILL) means kill_for_task terminated the
+    subprocess — surface as ``cancelled``, not ``failed``.
+    """
+    if getattr(response, "timed_out", False):
+        return "failed", f"Timeout after {timeout:.0f}s"
+    if getattr(response, "is_error", False):
+        if getattr(response, "returncode", None) in _CANCEL_RETURNCODES:
+            return "cancelled", ""
+        return "failed", getattr(response, "result", None) or "CLI error"
+    if has_pending_question:
+        return "waiting", ""
+    return "done", ""
 
 
 def _append_taskmemory(result_text: str, taskmemory_path: Path) -> str:
