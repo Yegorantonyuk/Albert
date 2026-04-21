@@ -49,6 +49,10 @@ def _setup_home_defaults(fw_root: Path) -> None:
     user_dir.mkdir()
     (user_dir / "CLAUDE.md").write_text("# User Tools CLAUDE.md")
     (user_dir / "my_tool.py").write_text("# user tool stub")
+    media_dir = tools / "media_tools"
+    media_dir.mkdir()
+    (media_dir / "CLAUDE.md").write_text("# Media Tools CLAUDE.md")
+    (media_dir / "transcribe_audio.py").write_text("# v0.16.0 transcribe_audio stub")
 
     # config.example.json at framework root (for smart-merge)
     (fw_root / "config.example.json").write_text('{"provider": "claude", "model": "opus"}')
@@ -236,6 +240,27 @@ def test_does_not_overwrite_user_tool_scripts(tmp_path: Path) -> None:
 
     init_workspace(paths)
     assert (user_dir / "my_tool.py").read_text() == "# my custom version"
+
+
+def test_media_tools_scripts_updated_on_reinit(tmp_path: Path) -> None:
+    """media_tools/*.py is Zone 2 (framework-managed) so v0.15.0 users get
+    the v0.16.0 env-var-hook transcribe scripts automatically on upgrade.
+    """
+    paths = _make_paths(tmp_path)
+    init_workspace(paths)
+
+    # Simulate a stale v0.15.0 script in the user's workspace
+    media_dir = paths.tools_dir / "media_tools"
+    deployed = media_dir / "transcribe_audio.py"
+    deployed.write_text("# v0.15.0 stale transcribe_audio (no env-var hook)")
+
+    # Framework updates the template and ductor restarts
+    template = paths.home_defaults / "workspace" / "tools" / "media_tools" / "transcribe_audio.py"
+    template.write_text("# v0.16.0 transcribe_audio with DUCTOR_TRANSCRIBE_COMMAND")
+
+    init_workspace(paths)
+
+    assert deployed.read_text() == "# v0.16.0 transcribe_audio with DUCTOR_TRANSCRIBE_COMMAND"
 
 
 def test_ductor_home_claude_md_overwritten(tmp_path: Path) -> None:
