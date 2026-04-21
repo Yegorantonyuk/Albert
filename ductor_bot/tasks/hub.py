@@ -458,8 +458,10 @@ class TaskHub:
             result_text = response.result or ""
             session_id = response.session_id or ""
 
-            # Append TASKMEMORY.md content so the parent gets the full picture
-            if status == "done":
+            # Append TASKMEMORY.md content so the parent gets the full picture.
+            # Also include it on cancelled tasks (MED #1): partial work a
+            # sub-agent wrote before SIGTERM/SIGKILL must not be silently lost.
+            if status in {"done", "cancelled"}:
                 taskmemory = self._registry.taskmemory_path(entry.task_id)
                 result_text = _append_taskmemory(result_text, taskmemory)
 
@@ -498,6 +500,10 @@ class TaskHub:
                 completed_at=time.time(),
                 elapsed_seconds=elapsed,
             )
+            # MED #1: include any partial TASKMEMORY.md the sub-agent wrote
+            # before cancellation so the parent sees the progress, not silence.
+            taskmemory = self._registry.taskmemory_path(entry.task_id)
+            partial_text = _append_taskmemory("", taskmemory)
             with contextlib.suppress(Exception):
                 await self._deliver(
                     TaskResult(
@@ -506,7 +512,7 @@ class TaskHub:
                         parent_agent=entry.parent_agent,
                         name=entry.name,
                         prompt_preview=entry.prompt_preview,
-                        result_text="",
+                        result_text=partial_text,
                         status="cancelled",
                         elapsed_seconds=elapsed,
                         provider=entry.provider,

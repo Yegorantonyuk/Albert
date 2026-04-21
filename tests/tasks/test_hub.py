@@ -163,6 +163,68 @@ class TestRunAndDeliver:
 
         await hub.shutdown()
 
+    @pytest.mark.parametrize("returncode", [143, 137, -15, -9])
+    async def test_sigterm_exit_is_classified_as_cancelled_not_failed(
+        self, registry: TaskRegistry, tmp_path: Path, returncode: int
+    ) -> None:
+        """Exit 143/137 (= 128 + SIGTERM/SIGKILL) is user /stop, not a CLI error."""
+        cli = _make_cli_service()
+        cli.execute.return_value.is_error = True
+        cli.execute.return_value.result = ""
+        cli.execute.return_value.returncode = returncode
+
+        delivered: list[TaskResult] = []
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock(side_effect=delivered.append))
+
+        hub.submit(_submit())
+        await asyncio.sleep(0.1)
+
+        assert len(delivered) == 1
+        assert delivered[0].status == "cancelled"
+        assert delivered[0].error == ""
+
+        await hub.shutdown()
+
+    async def test_cancelled_task_delivers_partial_taskmemory(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """MED #1: partial TASKMEMORY.md written before SIGTERM must reach the parent."""
+        cli = _make_cli_service()
+        cli.execute.return_value.is_error = True
+        cli.execute.return_value.result = ""
+        cli.execute.return_value.returncode = 143  # SIGTERM -> status=cancelled
+
+        delivered: list[TaskResult] = []
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock(side_effect=delivered.append))
+
+        task_id = hub.submit(_submit())
+        # Write partial memory BEFORE the task's execute mock returns — the
+        # task folder is seeded synchronously on submit, so this is safe.
+        memory = registry.taskmemory_path(task_id)
+        memory.parent.mkdir(parents=True, exist_ok=True)
+        memory.write_text("partial research findings\nline 2", encoding="utf-8")
+
+        await asyncio.sleep(0.1)
+
+        assert len(delivered) == 1
+        assert delivered[0].status == "cancelled"
+        assert "partial research findings" in delivered[0].result_text
+        assert "CONTENT FROM TASKMEMORY.MD" in delivered[0].result_text
+
+        await hub.shutdown()
+
 
 class TestCancel:
     async def test_cancel_running_task(self, registry: TaskRegistry, tmp_path: Path) -> None:
