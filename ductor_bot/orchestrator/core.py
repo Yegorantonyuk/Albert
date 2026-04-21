@@ -176,7 +176,12 @@ class Orchestrator:
         self._gateway_stop: Callable[[], Awaitable[None]] | None = None
         self._inflight_tracker = InflightTracker(paths.inflight_turns_path)
         self._memory_flusher: MemoryFlusher | None = (
-            MemoryFlusher(config.memory_flush, self._cli_service)
+            MemoryFlusher(
+                config.memory_flush,
+                self._cli_service,
+                config.memory_compaction,
+                paths,
+            )
             if config.memory_flush.enabled
             else None
         )

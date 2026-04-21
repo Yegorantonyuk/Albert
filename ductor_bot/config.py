@@ -95,6 +95,27 @@ _DEFAULT_FLUSH_PROMPT = (
     "nothing new worth saving, reply exactly: FLUSH_NOOP"
 )
 
+_DEFAULT_MEMORY_REFLECTION_PROMPT = (
+    "## MEMORY REFLECTION\n"
+    "Review the last several messages in this conversation.\n"
+    "Check: were there any new decisions, corrections, error solutions, user "
+    "preferences, or important facts that you did NOT yet write to memory?\n"
+    "If yes -- update memory_system/MAINMEMORY.md silently.\n"
+    "If everything is already recorded -- do nothing."
+)
+
+_DEFAULT_COMPACT_PROMPT = (
+    "## MEMORY COMPACTION\n"
+    "memory_system/MAINMEMORY.md has grown large. Rewrite it as follows:\n"
+    "1. Preserve entries from the last {preserve_days} days verbatim.\n"
+    "2. For older entries, cluster by topic and replace each cluster with "
+    "ONE dense entry that preserves all key facts in fewer lines.\n"
+    "3. Target size: roughly {target_lines} lines total.\n"
+    "4. Do NOT delete facts -- only compress their expression.\n"
+    "If MAINMEMORY.md is already at or below {target_lines} lines, reply "
+    "exactly: COMPACT_NOOP"
+)
+
 
 class HeartbeatTarget(BaseModel):
     """A specific chat/topic to send heartbeat checks to.
@@ -158,6 +179,24 @@ class MemoryFlushConfig(BaseModel):
     enabled: bool = True
     flush_prompt: str = _DEFAULT_FLUSH_PROMPT
     dedup_seconds: int = 300
+
+
+class MemoryReflectionConfig(BaseModel):
+    """Settings for the periodic memory reflection hook (#65)."""
+
+    enabled: bool = False
+    every_n_messages: int = 10
+    prompt: str = _DEFAULT_MEMORY_REFLECTION_PROMPT
+
+
+class MemoryCompactionConfig(BaseModel):
+    """Settings for LLM-driven memory compaction (#80)."""
+
+    enabled: bool = True
+    trigger_lines: int = 70
+    target_lines: int = 40
+    preserve_recency_days: int = 14
+    prompt: str = _DEFAULT_COMPACT_PROMPT
 
 
 class ImageConfig(BaseModel):
@@ -348,6 +387,8 @@ class AgentConfig(BaseModel):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
     memory_flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig)
+    memory_reflection: MemoryReflectionConfig = Field(default_factory=MemoryReflectionConfig)
+    memory_compaction: MemoryCompactionConfig = Field(default_factory=MemoryCompactionConfig)
     webhooks: WebhookConfig = Field(default_factory=WebhookConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
