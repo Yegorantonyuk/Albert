@@ -116,6 +116,21 @@ async def test_start_one_provider_claude(orch: Orchestrator) -> None:
     assert "OPUS" in labels
 
 
+async def test_start_one_provider_claude_includes_1m_variants(orch: Orchestrator) -> None:
+    """/model selector surfaces SONNET[1M] + OPUS[1M] buttons for Claude (#76)."""
+    with _patch_auth(
+        {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
+    ):
+        resp = await model_selector_start(orch, SessionKey(chat_id=1))
+    assert resp.buttons is not None
+    labels = [btn.text for row in resp.buttons.rows for btn in row]
+    callbacks = [btn.callback_data for row in resp.buttons.rows for btn in row]
+    assert "SONNET[1M]" in labels
+    assert "OPUS[1M]" in labels
+    assert "ms:m:opus[1m]" in callbacks
+    assert "ms:m:sonnet[1m]" in callbacks
+
+
 async def test_start_one_provider_codex(orch: Orchestrator) -> None:
     with (
         _patch_auth(
@@ -283,6 +298,17 @@ async def test_switch_model_basic(orch: Orchestrator) -> None:
     assert orch._config.model == "sonnet"
     mock_kill.assert_called_once_with(1)
     mock_reset.assert_not_called()
+
+
+async def test_switch_model_opus_1m_persists(orch: Orchestrator) -> None:
+    """opus[1m] is a valid Claude alias; switch_model persists it to config (#76)."""
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    result = await switch_model(orch, SessionKey(chat_id=1), "opus[1m]")
+    assert "opus[1m]" in result
+    assert orch._config.model == "opus[1m]"
+    saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
+    assert saved["model"] == "opus[1m]"
+    assert saved["provider"] == "claude"
 
 
 async def test_switch_model_already_set(orch: Orchestrator) -> None:

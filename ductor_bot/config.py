@@ -593,7 +593,17 @@ def _detect_posix_timezone() -> ZoneInfo | None:
         return None
 
 
-CLAUDE_MODELS_ORDERED: tuple[str, ...] = ("haiku", "sonnet", "opus")
+# `[1m]` suffix unlocks Claude Code's 1M-context beta on sonnet + opus.
+# The Claude CLI strips the suffix before dispatch and sets the beta header
+# internally (see https://code.claude.com/docs/en/model-config). Haiku has
+# no 1M variant upstream, so it is intentionally omitted.
+CLAUDE_MODELS_ORDERED: tuple[str, ...] = (
+    "haiku",
+    "sonnet",
+    "sonnet[1m]",
+    "opus",
+    "opus[1m]",
+)
 CLAUDE_MODELS: frozenset[str] = frozenset(CLAUDE_MODELS_ORDERED)
 
 # "auto" is a Gemini-specific alias (Gemini CLI auto-selects the best model).
