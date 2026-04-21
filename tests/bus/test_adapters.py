@@ -249,6 +249,14 @@ def test_from_task_result_cancelled() -> None:
     assert not env.needs_injection
 
 
+def test_from_task_result_preserves_parent_agent() -> None:
+    """#73: parent_agent must round-trip through Envelope.metadata so the
+    per-agent transport adapter can route the result back to the originating
+    sub-agent's bot (not the main agent's)."""
+    env = from_task_result(_FakeTaskResult(parent_agent="sonic"))
+    assert env.metadata["parent_agent"] == "sonic"
+
+
 def test_from_task_question() -> None:
     env = from_task_question("t1", "what color?", "what co...", 100)
     assert env.origin == Origin.TASK_QUESTION

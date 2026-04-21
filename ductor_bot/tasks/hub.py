@@ -485,6 +485,7 @@ class TaskHub:
                 model_override=entry.model or None,
                 provider_override=entry.provider or None,
                 chat_id=entry.chat_id,
+                topic_id=entry.thread_id,
                 process_label=f"task:{entry.task_id}",
                 timeout_seconds=timeout,
                 resume_session=resume_session,
