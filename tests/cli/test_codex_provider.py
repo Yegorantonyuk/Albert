@@ -293,6 +293,67 @@ class TestParseOutput:
         assert resp.stderr == "some error"
         assert resp.returncode == 1
 
+    def test_empty_stdout_strips_stdin_notice_from_stderr(self) -> None:
+        resp = CodexCLI._parse_output(
+            b"",
+            b"Reading prompt from stdin...\nError: thread/resume failed: no rollout found",
+            1,
+        )
+        assert resp.is_error is True
+        assert resp.result == "Error: thread/resume failed: no rollout found"
+        assert "Reading prompt" not in resp.result
+
+    def test_stdin_notice_stdout_prefers_stderr_error(self) -> None:
+        """Windows stdin notices must not hide the real stderr failure."""
+        resp = CodexCLI._parse_output(
+            b"Reading prompt from stdin...\n",
+            b"Error: thread/resume failed: no rollout found for thread id abc",
+            1,
+        )
+        assert resp.is_error is True
+        assert "no rollout found" in resp.result
+        assert "Reading prompt" not in resp.result
+
+    def test_stdin_notice_stdout_only_is_removed(self) -> None:
+        resp = CodexCLI._parse_output(b"Reading prompt from stdin...\n", b"", 1)
+        assert resp.is_error is True
+        assert resp.result == "Codex failed before producing a final response."
+
+    def test_non_streaming_turn_failed_error_beats_stdin_notice(self) -> None:
+        raw = "\n".join(
+            [
+                "Reading prompt from stdin...",
+                json.dumps(
+                    {
+                        "type": "turn.failed",
+                        "error": {"message": "You've hit your usage limit."},
+                    }
+                ),
+            ]
+        )
+        resp = CodexCLI._parse_output(raw.encode(), b"thread not found", 1)
+        assert resp.is_error is True
+        assert resp.result == "You've hit your usage limit."
+
+    def test_non_streaming_protocol_only_error_does_not_leak_jsonl(self) -> None:
+        raw = "\n".join(
+            [
+                json.dumps({"type": "thread.started", "thread_id": "th-42"}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "command_execution", "command": "sleep 10"},
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {"input_tokens": 12}}),
+            ]
+        )
+        resp = CodexCLI._parse_output(raw.encode(), b"", 1)
+        assert resp.is_error is True
+        assert resp.result == "Codex failed before producing a final response."
+        assert "thread.started" not in resp.result
+        assert "command_execution" not in resp.result
+
     def test_successful_jsonl_output(self) -> None:
         lines = "\n".join(
             [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -38,6 +39,12 @@ if TYPE_CHECKING:
     from ductor_bot.cli.timeout_controller import TimeoutController
 
 logger = logging.getLogger(__name__)
+
+_CODEX_STDIN_NOTICE_PREFIXES = (
+    "Reading prompt from stdin",
+    "Reading additional input from stdin",
+)
+_CODEX_NO_FINAL_RESPONSE = "Codex failed before producing a final response."
 
 
 class _StreamState:
@@ -235,9 +242,21 @@ class CodexCLI(BaseCLI):
 
         is_error = returncode != 0
         result_text, thread_id, usage = parse_codex_jsonl(raw)
+        cleaned_stdout = _strip_codex_stdin_notices(raw)
+        cleaned_stderr = _strip_codex_stdin_notices(stderr_text)
+        parsed_error = _extract_codex_error_detail(raw)
+        if result_text:
+            result = result_text
+        elif is_error:
+            stdout_fallback = "" if _is_codex_protocol_only(raw) else cleaned_stdout
+            result = parsed_error or cleaned_stderr or stdout_fallback or _CODEX_NO_FINAL_RESPONSE
+        elif _is_codex_protocol_only(raw):
+            result = _CODEX_NO_FINAL_RESPONSE
+        else:
+            result = raw
         response = CLIResponse(
             session_id=thread_id,
-            result=result_text or raw,
+            result=result,
             is_error=is_error or not result_text,
             returncode=returncode,
             stderr=stderr_text,
@@ -285,6 +304,69 @@ def _codex_final_result(
         is_error=False,
         returncode=result.process.returncode,
     )
+
+
+def _is_codex_stdin_notice(line: str) -> bool:
+    """Return True for Codex's informational stdin prelude lines."""
+    stripped = line.strip()
+    return any(stripped.startswith(prefix) for prefix in _CODEX_STDIN_NOTICE_PREFIXES)
+
+
+def _strip_codex_stdin_notices(text: str) -> str:
+    """Remove stdin notice lines from Codex stdout/stderr text."""
+    return "\n".join(line for line in text.splitlines() if not _is_codex_stdin_notice(line)).strip()
+
+
+def _is_codex_protocol_only(raw: str) -> bool:
+    """Return True when stdout contains only Codex JSONL protocol events."""
+    saw_protocol_event = False
+    for raw_line in raw.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or _is_codex_stdin_notice(stripped):
+            continue
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(data, dict):
+            return False
+        if (
+            isinstance(data.get("type"), str)
+            or isinstance(data.get("item"), dict)
+            or isinstance(data.get("thread_id"), str)
+            or isinstance(data.get("usage"), dict)
+        ):
+            saw_protocol_event = True
+            continue
+        return False
+    return saw_protocol_event
+
+
+def _extract_codex_error_detail(raw: str) -> str:
+    """Extract a structured Codex error message from JSONL stdout."""
+    detail = ""
+    for raw_line in raw.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or _is_codex_stdin_notice(stripped):
+            continue
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("type") == "turn.failed":
+            error = data.get("error", {})
+            if isinstance(error, dict):
+                message = error.get("message")
+                if isinstance(message, str):
+                    detail = message.strip()
+        item = data.get("item")
+        if isinstance(item, dict) and item.get("type") == "error":
+            message = item.get("message")
+            if isinstance(message, str) and message.strip():
+                detail = message.strip()
+    return detail
 
 
 def _log_cmd(cmd: list[str], *, streaming: bool = False) -> None:
