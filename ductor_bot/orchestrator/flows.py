@@ -146,6 +146,27 @@ async def _update_session(
     )
 
 
+async def _preserve_session_from_response(
+    orch: Orchestrator,
+    session: SessionData,
+    response: AgentResponse,
+    *,
+    reason: str,
+) -> None:
+    """Persist a first response session id even when the turn ends early."""
+    if response.session_id and not session.session_id:
+        logger.debug("%s: preserving session_id %s for resume", reason, response.session_id[:8])
+        session.session_id = response.session_id
+    elif response.session_id and response.session_id != session.session_id:
+        logger.debug(
+            "%s: keeping existing session_id %s over response session_id %s",
+            reason,
+            session.session_id[:8],
+            response.session_id[:8],
+        )
+    await orch._sessions.preserve_session_identity(session)
+
+
 async def _reset_on_error(
     orch: Orchestrator,
     key: SessionKey,
