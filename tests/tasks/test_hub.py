@@ -633,3 +633,188 @@ class TestPerAgentCLI:
         assert len(delivered) == 1
 
         await hub.shutdown()
+
+
+class TestTopicIdPlumbing:
+    """#74: TaskEntry.thread_id must flow into AgentRequest.topic_id so that
+    DUCTOR_TOPIC_ID is set in the task subprocess env. Without this, sub-tasks
+    created from within a running task lose the originating topic context and
+    route their results to the base/General topic."""
+
+    async def test_run_passes_topic_id_to_agent_request(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """AgentRequest.topic_id equals TaskEntry.thread_id when the latter is set."""
+        cli = _make_cli_service()
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        submit = TaskSubmit(
+            chat_id=42,
+            prompt="do stuff in a topic",
+            message_id=1,
+            thread_id=5150,
+            parent_agent="main",
+            name="Topic Task",
+        )
+        hub.submit(submit)
+        await asyncio.sleep(0.1)
+
+        # Capture the AgentRequest passed to cli.execute.
+        cli.execute.assert_called_once()
+        agent_request = cli.execute.call_args[0][0]
+        assert agent_request.topic_id == 5150
+        assert agent_request.chat_id == 42
+
+        await hub.shutdown()
+
+    async def test_run_passes_none_topic_id_when_thread_id_missing(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """Backward-compat: thread_id=None yields topic_id=None on AgentRequest."""
+        cli = _make_cli_service()
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        hub.submit(_submit())  # thread_id=None via helper
+        await asyncio.sleep(0.1)
+
+        cli.execute.assert_called_once()
+        agent_request = cli.execute.call_args[0][0]
+        assert agent_request.topic_id is None
+
+        await hub.shutdown()
+
+
+class TestPerAgentDeliveryIsolation:
+    """#73: TaskResult delivery must route through the parent_agent's registered
+    handler only -- sibling agents' handlers MUST NOT see results that weren't
+    addressed to them. Locks in the architectural per-agent routing so a future
+    refactor cannot silently regress it into delivering everything to main."""
+
+    async def test_result_isolation_between_agents(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        """A task with parent_agent='sub1' invokes only sub1's handler."""
+        main_handler = AsyncMock()
+        sub1_handler = AsyncMock()
+        sub2_handler = AsyncMock()
+
+        sub_cli = _make_cli_service("sub1-output")
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=_make_cli_service("main-output"),
+            config=_make_config(),
+        )
+        hub.set_cli_service("sub1", sub_cli)
+        hub.set_result_handler("main", main_handler)
+        hub.set_result_handler("sub1", sub1_handler)
+        hub.set_result_handler("sub2", sub2_handler)
+
+        submit = TaskSubmit(
+            chat_id=55,
+            prompt="sub-agent task",
+            message_id=1,
+            thread_id=None,
+            parent_agent="sub1",
+            name="Sub1 Task",
+        )
+        hub.submit(submit)
+        await asyncio.sleep(0.1)
+
+        sub1_handler.assert_called_once()
+        main_handler.assert_not_called()
+        sub2_handler.assert_not_called()
+
+        delivered_result = sub1_handler.call_args[0][0]
+        assert delivered_result.parent_agent == "sub1"
+
+        await hub.shutdown()
+
+
+class TestMaintenance:
+    async def test_maintenance_cleans_finished_retention(
+        self, registry: TaskRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Periodic maintenance should prune finished task history, not just orphans."""
+        old_done = registry.create(_submit(name="old"), "claude", "opus")
+        recent_done = registry.create(_submit(name="recent"), "claude", "opus")
+        registry.update_status(old_done.task_id, "done")
+        registry.update_status(recent_done.task_id, "done")
+        old_done.completed_at = 1.0
+        old_done.created_at = 1.0
+        recent_done.completed_at = 10_000.0
+        recent_done.created_at = 10_000.0
+        registry._persist()
+
+        async def fake_sleep(_: float) -> None:
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr("ductor_bot.tasks.hub.asyncio.sleep", fake_sleep)
+        monkeypatch.setattr("ductor_bot.tasks.registry.time.time", lambda: 10_000.0)
+
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=_make_cli_service(),
+            config=_make_config(
+                finished_retention_hours=1,
+                finished_keep_last=100,
+            ),
+        )
+
+        await hub._maintenance_loop()
+
+        assert registry.get(old_done.task_id) is None
+        assert registry.get(recent_done.task_id) is not None
+
+
+class TestAppendTaskmemory:
+    """#91: _append_taskmemory must emit a WARNING log and include the original
+    length + full file path in the suffix when truncation occurs. Without this,
+    parent agents receive silently-truncated memory content."""
+
+    def test_warns_on_truncation(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        from ductor_bot.tasks.hub import _TASKMEMORY_MAX_LEN, _append_taskmemory
+
+        memory_file = tmp_path / "TASKMEMORY.md"
+        original_len = _TASKMEMORY_MAX_LEN + 1000
+        memory_file.write_text("X" * original_len, encoding="utf-8")
+
+        with caplog.at_level("WARNING", logger="ductor_bot.tasks.hub"):
+            result = _append_taskmemory("result_text", memory_file)
+
+        # WARNING log fired
+        assert any("TASKMEMORY truncated" in rec.message for rec in caplog.records)
+        # Suffix shows original length so the parent agent knows how much was cut
+        assert str(original_len) in result
+        # Suffix points to the full file path so the parent agent can read it
+        assert str(memory_file) in result
+        assert "truncated" in result.lower()
+
+    def test_no_warning_under_limit(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        from ductor_bot.tasks.hub import _append_taskmemory
+
+        memory_file = tmp_path / "TASKMEMORY.md"
+        memory_file.write_text("short content", encoding="utf-8")
+
+        with caplog.at_level("WARNING", logger="ductor_bot.tasks.hub"):
+            result = _append_taskmemory("result_text", memory_file)
+
+        assert not any("TASKMEMORY truncated" in rec.message for rec in caplog.records)
+        assert "truncated" not in result.lower()
+        assert "short content" in result
