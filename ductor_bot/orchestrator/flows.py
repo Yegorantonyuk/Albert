@@ -266,6 +266,83 @@ class _RecoveryContext:
     cbs: StreamingCallbacks = field(default_factory=StreamingCallbacks)
 
 
+@dataclass(slots=True)
+class _RecoveryOutcome:
+    """Result of the one-shot session-recovery gate.
+
+    ``retry_performed`` is True when a fresh-session retry actually ran.
+    ``session_recovered`` is True only when that retry succeeded after an
+    invalid-session rejection (used to prepend the user-facing notice).
+    ``failed_result`` is non-None when the retry still returned stale-session
+    and callers must short-circuit with it (MED #8 circuit breaker).
+    """
+
+    request: AgentRequest
+    session: SessionData
+    response: AgentResponse
+    retry_performed: bool
+    session_recovered: bool
+    failed_result: OrchestratorResult | None
+
+
+async def _maybe_recover_session(  # noqa: PLR0913
+    orch: Orchestrator,
+    key: SessionKey,
+    text: str,
+    request: AgentRequest,
+    session: SessionData,
+    response: AgentResponse,
+    *,
+    model_override: str | None,
+    streaming: bool = False,
+    cbs: StreamingCallbacks | None = None,
+) -> _RecoveryOutcome:
+    """Run the one-shot recovery gate shared by normal() and normal_streaming().
+
+    If the CLI reported a recoverable failure (SIGKILL or stale session) AND
+    the user did not abort/interrupt, retry exactly once with a fresh session.
+    If the retry ALSO returns stale-session, emit a clear error and surface
+    ``failed_result`` so callers can short-circuit (MED #8 hard cap).
+    """
+    _reg = orch._process_registry
+    if (
+        _reg.was_aborted(key.chat_id)
+        or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+        or _reg.was_interrupted(key.chat_id)
+        or not _needs_session_recovery(response)
+    ):
+        return _RecoveryOutcome(
+            request=request,
+            session=session,
+            response=response,
+            retry_performed=False,
+            session_recovered=False,
+            failed_result=None,
+        )
+
+    session_recovered = _is_invalid_session(response)
+    reason = "invalid_session" if session_recovered else "sigkill"
+    ctx = _RecoveryContext(
+        reason=reason,
+        model_override=model_override,
+        streaming=streaming,
+        cbs=cbs or StreamingCallbacks(),
+    )
+    request, session, response = await _recover_session(orch, key, text, ctx)
+    failed_result: OrchestratorResult | None = None
+    if _is_invalid_session(response):
+        logger.error("Session recovery failed on retry for chat_id=%s", key.chat_id)
+        failed_result = OrchestratorResult(text=_session_recovery_failed_msg())
+    return _RecoveryOutcome(
+        request=request,
+        session=session,
+        response=response,
+        retry_performed=True,
+        session_recovered=session_recovered,
+        failed_result=failed_result,
+    )
+
+
 async def _recover_session(
     orch: Orchestrator,
     key: SessionKey,
@@ -374,15 +451,10 @@ async def normal(
         session_recovered = False
         _reg = orch._process_registry
         if (
-            not _reg.was_aborted(key.chat_id)
-            and not _reg.was_interrupted(key.chat_id)
-            and _needs_session_recovery(response)
+            _reg.was_aborted(key.chat_id)
+            or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+            or _reg.was_interrupted(key.chat_id)
         ):
-            session_recovered = _is_invalid_session(response)
-            reason = "invalid_session" if session_recovered else "sigkill"
-            ctx = _RecoveryContext(reason=reason, model_override=model_override)
-            request, session, response = await _recover_session(orch, key, text, ctx)
-        if _reg.was_aborted(key.chat_id) or _reg.was_interrupted(key.chat_id):
             _reg.clear_interrupt(key.chat_id)
             logger.info("Normal flow aborted/interrupted by user")
             return OrchestratorResult(text="")
@@ -446,16 +518,10 @@ async def normal_streaming(
         )
         _reg = orch._process_registry
         if (
-            not _reg.was_aborted(key.chat_id)
-            and not _reg.was_interrupted(key.chat_id)
-            and _needs_session_recovery(response)
+            _reg.was_aborted(key.chat_id)
+            or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+            or _reg.was_interrupted(key.chat_id)
         ):
-            reason = "invalid_session" if _is_invalid_session(response) else "sigkill"
-            ctx = _RecoveryContext(
-                reason=reason, model_override=model_override, streaming=True, cbs=cb
-            )
-            request, session, response = await _recover_session(orch, key, text, ctx)
-        if _reg.was_aborted(key.chat_id) or _reg.was_interrupted(key.chat_id):
             _reg.clear_interrupt(key.chat_id)
             logger.info("Streaming flow aborted/interrupted by user")
             return OrchestratorResult(text="")
@@ -620,7 +686,11 @@ async def named_session_flow(
     response = await orch._cli_service.execute(request)
 
     _reg = orch._process_registry
-    if _reg.was_aborted(key.chat_id) or _reg.was_interrupted(key.chat_id):
+    if (
+        _reg.was_aborted(key.chat_id)
+        or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+        or _reg.was_interrupted(key.chat_id)
+    ):
         _reg.clear_interrupt(key.chat_id)
         ns.status = "idle"
         return OrchestratorResult(text="")
@@ -686,7 +756,11 @@ async def named_session_streaming(
     )
 
     _reg2 = orch._process_registry
-    if _reg2.was_aborted(key.chat_id) or _reg2.was_interrupted(key.chat_id):
+    if (
+        _reg2.was_aborted(key.chat_id)
+        or _reg2.was_aborted_topic(key.chat_id, key.topic_id)
+        or _reg2.was_interrupted(key.chat_id)
+    ):
         _reg2.clear_interrupt(key.chat_id)
         ns.status = "idle"
         return OrchestratorResult(text="")
