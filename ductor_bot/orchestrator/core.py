@@ -32,6 +32,7 @@ from ductor_bot.orchestrator.commands import (
     cmd_memory,
     cmd_model,
     cmd_reset,
+    cmd_reset_current,
     cmd_sessions,
     cmd_status,
     cmd_tasks,
@@ -391,6 +392,8 @@ class Orchestrator:
     def _register_commands(self) -> None:
         reg = self._command_registry
         reg.register_async("/new", cmd_reset)
+        reg.register_async("/reset", cmd_reset_current)
+        reg.register_async("/reset ", cmd_reset_current)
         # /stop is handled entirely by the Middleware abort path (before the lock)
         # and never reaches the orchestrator command registry.
         reg.register_async("/status", cmd_status)
@@ -429,6 +432,21 @@ class Orchestrator:
         """Reset the session for a given key."""
         await self._sessions.reset_session(key)
         logger.info("Session reset")
+
+    async def reset_current_provider_session(self, key: SessionKey) -> str:
+        """Reset the bucket the user is currently on, keeping that provider active.
+
+        Unlike ``reset_active_provider_session`` (``/new`` -> config default), this
+        clears the *currently active* provider's bucket and stays on it.
+        """
+        active = await self._sessions.get_active(key)
+        if active is None:
+            model, provider = self.resolve_runtime_target(self._config.model)
+        else:
+            model, provider = active.model, active.provider
+        await self._sessions.reset_provider_session(key, provider=provider, model=model)
+        logger.info("Current provider session reset provider=%s model=%s", provider, model)
+        return provider
 
     async def reset_active_provider_session(self, key: SessionKey) -> str:
         """Reset only the active provider session bucket for a given key."""
