@@ -397,10 +397,28 @@ def _normalize_key_like_value(raw: str) -> str:
     return value
 
 
+def check_antigravity_auth() -> AuthResult:
+    """Check if Antigravity CLI (agy) is installed and configured."""
+    import shutil
+
+    if shutil.which("agy") is not None:
+        logger.debug("Auth check provider=antigravity status=AUTHENTICATED (binary found)")
+        return AuthResult(provider="antigravity", status=AuthStatus.AUTHENTICATED)
+
+    ccs_settings = Path.home() / ".ccs" / "agy.settings.json"
+    if ccs_settings.is_file():
+        logger.debug("Auth check provider=antigravity status=AUTHENTICATED (CCS settings)")
+        return AuthResult(provider="antigravity", status=AuthStatus.AUTHENTICATED)
+
+    logger.debug("Auth check provider=antigravity status=NOT_FOUND")
+    return AuthResult(provider="antigravity", status=AuthStatus.NOT_FOUND)
+
+
 _CHECKERS: dict[str, Callable[[], AuthResult]] = {
     "claude": check_claude_auth,
     "codex": check_codex_auth,
     "gemini": check_gemini_auth,
+    "antigravity": check_antigravity_auth,
 }
 
 

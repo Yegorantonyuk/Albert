@@ -1,0 +1,160 @@
+"""Tests for Antigravity CLI provider integration."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from ductor_bot.cli.antigravity_events import (
+    parse_antigravity_json,
+    parse_antigravity_stream_line,
+)
+from ductor_bot.cli.antigravity_provider import AntigravityCLI, _finish_stream_process
+from ductor_bot.cli.auth import AuthStatus, check_antigravity_auth
+from ductor_bot.cli.base import CLIConfig
+from ductor_bot.cli.stream_events import (
+    AssistantTextDelta,
+    ResultEvent,
+    ThinkingEvent,
+    ToolResultEvent,
+    ToolUseEvent,
+)
+from ductor_bot.config import ModelRegistry
+
+
+def test_antigravity_plain_text_line_becomes_text_delta() -> None:
+    events = parse_antigravity_stream_line("hello")
+
+    assert len(events) == 1
+    assert isinstance(events[0], AssistantTextDelta)
+    assert events[0].text == "hello"
+
+
+def test_antigravity_thought_marker_is_split_from_text() -> None:
+    events = parse_antigravity_stream_line("[Thought: plan]\nfinal answer")
+
+    assert [type(event) for event in events] == [ThinkingEvent, AssistantTextDelta]
+    assert events[0].text == "[Thought: plan]"
+    assert events[1].text == "final answer"
+
+
+def test_antigravity_structured_tool_events() -> None:
+    tool_use = json.dumps({"type": "tool_use", "name": "Read", "id": "tool-1"})
+    tool_result = json.dumps({"type": "tool_result", "tool_id": "tool-1", "output": "ok"})
+
+    use_events = parse_antigravity_stream_line(tool_use)
+    result_events = parse_antigravity_stream_line(tool_result)
+
+    assert isinstance(use_events[0], ToolUseEvent)
+    assert use_events[0].tool_name == "Read"
+    assert isinstance(result_events[0], ToolResultEvent)
+    assert result_events[0].output == "ok"
+
+
+def test_antigravity_result_event() -> None:
+    events = parse_antigravity_stream_line(
+        json.dumps({"type": "result", "content": "done", "session_id": "conv-1"})
+    )
+
+    assert len(events) == 1
+    assert isinstance(events[0], ResultEvent)
+    assert events[0].result == "done"
+    assert events[0].session_id == "conv-1"
+
+
+def test_antigravity_batch_json_extracts_common_content_keys() -> None:
+    assert parse_antigravity_json('{"result":"ok"}') == "ok"
+    assert parse_antigravity_json("plain") == "plain"
+
+
+def test_antigravity_command_uses_print_and_conversation() -> None:
+    cli = AntigravityCLI(CLIConfig(provider="antigravity", model="antigravity-default"))
+
+    cmd = cli._build_command(resume_session="conv-1")
+
+    assert cmd[:2] == ["agy", "--print"]
+    assert "--conversation" in cmd
+    assert "conv-1" in cmd
+
+
+def test_antigravity_streaming_command_uses_prompt_interactive() -> None:
+    cli = AntigravityCLI(CLIConfig(provider="antigravity", permission_mode="bypassPermissions"))
+
+    cmd = cli._build_command(streaming=True, continue_session=True)
+
+    assert "--prompt-interactive" in cmd
+    assert "--continue" in cmd
+    assert "--dangerously-skip-permissions" in cmd
+
+
+def test_antigravity_command_includes_cli_parameters() -> None:
+    cli = AntigravityCLI(
+        CLIConfig(
+            provider="antigravity",
+            cli_parameters=["--log-file", "agy.log"],
+        )
+    )
+
+    cmd = cli._build_command()
+
+    assert cmd[-2:] == ["--log-file", "agy.log"]
+
+
+def test_antigravity_ignores_docker_container() -> None:
+    cli = AntigravityCLI(
+        CLIConfig(
+            provider="antigravity",
+            model="antigravity-default",
+            docker_container="ductor-sandbox",
+            working_dir=".",
+        )
+    )
+
+    cmd, cwd = cli._host_command(["agy", "--print", "hello"])
+
+    assert cmd[:2] == ["agy", "--print"]
+    assert "docker" not in cmd
+    assert cwd
+
+
+async def test_finish_stream_process_waits_before_killing() -> None:
+    proc = AsyncMock(spec=asyncio.subprocess.Process)
+    proc.returncode = None
+    proc.pid = 123
+    proc.wait = AsyncMock(side_effect=lambda: setattr(proc, "returncode", 0))
+    stderr_task = asyncio.create_task(_bytes_result(b""))
+
+    with patch("ductor_bot.cli.antigravity_provider.force_kill_process_tree") as kill:
+        await _finish_stream_process(proc, stderr_task)
+
+    kill.assert_not_called()
+
+
+async def _bytes_result(value: bytes) -> bytes:
+    return value
+
+
+def test_antigravity_auth_uses_binary_detection() -> None:
+    with patch("shutil.which", return_value="C:/agy/bin/agy.exe"):
+        result = check_antigravity_auth()
+
+    assert result.provider == "antigravity"
+    assert result.status == AuthStatus.AUTHENTICATED
+
+
+def test_antigravity_auth_checks_ccs_settings(tmp_path: Path, monkeypatch) -> None:
+    settings = tmp_path / ".ccs" / "agy.settings.json"
+    settings.parent.mkdir()
+    settings.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    with patch("shutil.which", return_value=None):
+        result = check_antigravity_auth()
+
+    assert result.status == AuthStatus.AUTHENTICATED
+
+
+def test_antigravity_model_prefix_routes_to_provider() -> None:
+    assert ModelRegistry().provider_for("antigravity-default") == "antigravity"
