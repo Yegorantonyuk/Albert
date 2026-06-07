@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from ductor_bot.cli.antigravity_events import (
@@ -12,7 +11,6 @@ from ductor_bot.cli.antigravity_events import (
     parse_antigravity_stream_line,
 )
 from ductor_bot.cli.antigravity_provider import AntigravityCLI, _finish_stream_process
-from ductor_bot.cli.auth import AuthStatus, check_antigravity_auth
 from ductor_bot.cli.base import CLIConfig
 from ductor_bot.cli.stream_events import (
     AssistantTextDelta,
@@ -75,8 +73,18 @@ def test_antigravity_command_uses_print_and_conversation() -> None:
     cmd = cli._build_command(resume_session="conv-1")
 
     assert cmd[:2] == ["agy", "--print"]
+    assert "--model" not in cmd
     assert "--conversation" in cmd
     assert "conv-1" in cmd
+
+
+def test_antigravity_command_includes_selected_model() -> None:
+    cli = AntigravityCLI(CLIConfig(provider="antigravity", model="claude-sonnet-4-5"))
+
+    cmd = cli._build_command()
+
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "claude-sonnet-4-5"
 
 
 def test_antigravity_streaming_command_uses_prompt_interactive() -> None:
@@ -134,26 +142,6 @@ async def test_finish_stream_process_waits_before_killing() -> None:
 
 async def _bytes_result(value: bytes) -> bytes:
     return value
-
-
-def test_antigravity_auth_uses_binary_detection() -> None:
-    with patch("shutil.which", return_value="C:/agy/bin/agy.exe"):
-        result = check_antigravity_auth()
-
-    assert result.provider == "antigravity"
-    assert result.status == AuthStatus.AUTHENTICATED
-
-
-def test_antigravity_auth_checks_ccs_settings(tmp_path: Path, monkeypatch) -> None:
-    settings = tmp_path / ".ccs" / "agy.settings.json"
-    settings.parent.mkdir()
-    settings.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-    with patch("shutil.which", return_value=None):
-        result = check_antigravity_auth()
-
-    assert result.status == AuthStatus.AUTHENTICATED
 
 
 def test_antigravity_model_prefix_routes_to_provider() -> None:

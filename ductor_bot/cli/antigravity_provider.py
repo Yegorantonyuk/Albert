@@ -21,6 +21,7 @@ from ductor_bot.cli.base import (
 from ductor_bot.cli.process_registry import ProcessRegistry, TrackedProcess
 from ductor_bot.cli.stream_events import ResultEvent, StreamEvent, SystemInitEvent
 from ductor_bot.cli.types import CLIResponse
+from ductor_bot.config import ANTIGRAVITY_MODELS
 from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
 from ductor_bot.infra.process_tree import force_kill_process_tree
 
@@ -88,6 +89,9 @@ class AntigravityCLI(BaseCLI):
             cmd += ["--print"]
         else:
             cmd += ["--prompt-interactive"]
+
+        if self._config.model and self._config.model not in ANTIGRAVITY_MODELS:
+            cmd += ["--model", self._config.model]
 
         # Session resume / continue
         if resume_session:
