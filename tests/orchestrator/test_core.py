@@ -72,9 +72,7 @@ async def test_reset_command_resets_current_non_default_provider_bucket(
     claude.session_id = "claude-sid"
     await orch._sessions.update_session(claude)
 
-    codex, _ = await orch._sessions.resolve_session(
-        key, provider="codex", model="gpt-5.2-codex"
-    )
+    codex, _ = await orch._sessions.resolve_session(key, provider="codex", model="gpt-5.2-codex")
     codex.session_id = "codex-sid"
     await orch._sessions.update_session(codex)
 

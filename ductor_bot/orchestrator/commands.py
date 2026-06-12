@@ -37,9 +37,7 @@ async def cmd_reset(orch: Orchestrator, key: SessionKey, _text: str) -> Orchestr
     return OrchestratorResult(text=new_session_text(provider))
 
 
-async def cmd_reset_current(
-    orch: Orchestrator, key: SessionKey, _text: str
-) -> OrchestratorResult:
+async def cmd_reset_current(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /reset: kill processes and reset the *current* provider session."""
     logger.info("Reset (current) requested")
     await orch._process_registry.kill_all(key.chat_id)
