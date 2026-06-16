@@ -13,9 +13,10 @@ import time
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.types import AgentRequest
-from ductor_bot.orchestrator.flows import _update_session
+from ductor_bot.orchestrator.flows import _is_invalid_session, _update_session
 from ductor_bot.session.key import SessionKey
 from ductor_bot.session.named import NamedSession
+from ductor_bot.workspace.loader import build_appended_files_block
 
 if TYPE_CHECKING:
     from ductor_bot.multiagent.bus import AsyncInterAgentResult
@@ -46,8 +47,12 @@ async def _inject_prompt(  # noqa: PLR0913
     active = await orch._sessions.get_active(key)
     resume_id = active.session_id if active else None
 
+    files_block = await build_appended_files_block(
+        orch.paths, orch._config.append_system_prompt_files
+    )
     request = AgentRequest(
         prompt=prompt,
+        append_system_prompt=files_block,
         chat_id=chat_id,
         topic_id=topic_id,
         process_label=process_label,
@@ -181,8 +186,12 @@ async def handle_interagent_message(
     )
 
     ns.status = "running"
+    files_block = await build_appended_files_block(
+        orch.paths, orch._config.append_system_prompt_files
+    )
     request = AgentRequest(
         prompt=prompt,
+        append_system_prompt=files_block,
         chat_id=chat_id,
         process_label=f"interagent:{sender}",
         resume_session=ns.session_id or None,
@@ -198,6 +207,61 @@ async def handle_interagent_message(
             f"Error processing inter-agent message from '{sender}'",
             ns.name,
             provider_switch_notice,
+        )
+
+    # #81: Claude / Codex CLI can invalidate cached session IDs after a
+    # version bump or cache clear. Detect the stale-session error and retry
+    # ONCE with a fresh session so async inter-agent sends don't silently
+    # fail. The recovery is visible: it emits a WARNING log AND prepends a
+    # notice to provider_switch_notice so the caller sees what happened.
+    if _is_invalid_session(response):
+        stale_id = ns.session_id
+        logger.warning(
+            "Inter-agent session stale (from=%s session=%s stale_id=%s) -- "
+            "retrying with fresh session",
+            sender,
+            ns.name,
+            stale_id,
+        )
+        orch._named_sessions.end_session(chat_id, ns.name)
+        ns, _, _ = _get_or_create_interagent_session(orch, sender, new_session=True)
+        ns.status = "running"
+        files_block = await build_appended_files_block(
+            orch.paths, orch._config.append_system_prompt_files
+        )
+        retry_request = AgentRequest(
+            prompt=prompt,
+            append_system_prompt=files_block,
+            chat_id=chat_id,
+            transport=transport,
+            process_label=f"interagent:{sender}",
+            resume_session=None,
+            timeout_seconds=orch._config.cli_timeout,
+        )
+        try:
+            response = await orch._cli_service.execute(retry_request)
+        except Exception:
+            ns.status = "idle"
+            logger.exception("Inter-agent retry failed (from=%s)", sender)
+            return (
+                f"Error processing inter-agent message from '{sender}' (after stale-session retry)",
+                ns.name,
+                provider_switch_notice,
+            )
+        recovery_notice = (
+            f"Inter-agent session `{ns.name}` was stale "
+            f"(CLI rejected session `{stale_id}`); started a fresh session "
+            f"and retried. This is normal after a CLI update."
+        )
+        provider_switch_notice = (
+            f"{provider_switch_notice}\n{recovery_notice}".strip()
+            if provider_switch_notice
+            else recovery_notice
+        )
+
+    if response and response.session_id:
+        orch._named_sessions.update_after_response(
+            chat_id, ns.name, response.session_id, status="idle"
         )
     else:
         if response and response.session_id:
