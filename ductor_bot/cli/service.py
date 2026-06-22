@@ -324,6 +324,9 @@ class CLIService:
     def _make_cli(self, request: AgentRequest) -> BaseCLI:
         """Create a BaseCLI instance for the given request."""
         provider, model = self.resolve_provider(request)
+        # Per-turn effort: request override wins, else the service default
+        # (mirrors model_override or default_model).
+        effort = request.effort_override or self._config.reasoning_effort
 
         return create_cli(
             CLIConfig(
@@ -335,7 +338,7 @@ class CLIService:
                 max_turns=self._config.max_turns,
                 max_budget_usd=self._config.max_budget_usd,
                 permission_mode=self._config.permission_mode,
-                reasoning_effort=self._config.reasoning_effort,
+                reasoning_effort=effort,
                 gemini_api_key=self._config.gemini_api_key,
                 docker_container=self._config.docker_container,
                 process_registry=self._process_registry,

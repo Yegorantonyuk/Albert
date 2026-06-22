@@ -73,6 +73,8 @@ class ClaudeCodeCLI(BaseCLI):
 
         _add_opt(cmd, "--permission-mode", cfg.permission_mode)
         _add_opt(cmd, "--model", cfg.model)
+        if cfg.reasoning_effort and cfg.reasoning_effort != "default":
+            cmd += ["--effort", cfg.reasoning_effort]
         _add_opt(cmd, "--system-prompt", cfg.system_prompt)
         if append_prompt_file:
             cmd += ["--append-system-prompt-file", append_prompt_file]

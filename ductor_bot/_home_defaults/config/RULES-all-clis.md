@@ -31,9 +31,10 @@ Edit only when the user asks for behavior changes.
     - `gemini-3-pro-preview` - Next-gen preview
     - `gemini-3-flash-preview` - Next-gen fast preview
     - `gemini-3.1-pro-preview` - Latest preview
-- `reasoning_effort`: `low|medium|high|xhigh` (Codex only)
-  - Most models support: `low`, `medium`, `high`, `xhigh`
-  - `gpt-5.1-codex-mini` only: `medium`, `high`
+- `reasoning_effort`: reasoning depth for Codex and Claude
+  - Codex: `low`, `medium`, `high`, `xhigh` (`gpt-5.1-codex-mini` only: `medium`, `high`)
+  - Claude: `low`, `medium`, `high`, `xhigh`, `max`
+  - Change it for the active provider with the `/effort` command
 - `permission_mode`: CLI permission behavior
 
 ### Time and Scheduling
