@@ -97,14 +97,14 @@ async def test_normal_error_preserves_session(orch: Orchestrator) -> None:
     )
     mock_kill = AsyncMock(return_value=0)
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
 
     result = await normal(orch, SessionKey(chat_id=1), "Hello")
     assert "Session Error" in result.text
     assert "[opus]" in result.text
     assert "/new" in result.text
     assert mock_execute.call_count == 1
-    mock_kill.assert_called_once_with(1)
+    mock_kill.assert_called_once_with(1, None)
 
 
 async def test_normal_timeout_preserves_session(orch: Orchestrator) -> None:
@@ -115,7 +115,7 @@ async def test_normal_timeout_preserves_session(orch: Orchestrator) -> None:
         return_value=_mock_response(is_error=True, timed_out=True, result=""),
     )
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
 
     result = await normal(orch, SessionKey(chat_id=1), "Hello")
     assert "Timeout" in result.text
@@ -131,7 +131,7 @@ async def test_normal_next_message_can_succeed_after_error(orch: Orchestrator) -
     success_resp = _mock_response(result="All good")
     mock_execute = AsyncMock(side_effect=[error_resp, success_resp])
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
 
     first = await normal(orch, SessionKey(chat_id=1), "Hello")
     second = await normal(orch, SessionKey(chat_id=1), "Hello again")
@@ -156,7 +156,7 @@ async def test_normal_sigkill_recovers_once_then_succeeds(orch: Orchestrator) ->
     mock_execute = AsyncMock(side_effect=[sigkill_resp, success_resp])
     mock_reset_provider = AsyncMock()
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset_provider)
 
     result = await normal(orch, SessionKey(chat_id=1), "Hello")
@@ -173,7 +173,7 @@ async def test_normal_sigkill_recovers_once_then_asks_user_retry(orch: Orchestra
     mock_execute = AsyncMock(side_effect=[sigkill_resp, sigkill_resp])
     mock_reset_provider = AsyncMock()
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset_provider)
 
     result = await normal(orch, SessionKey(chat_id=1), "Hello")
@@ -307,7 +307,7 @@ async def test_streaming_sigkill_recovers_once_then_succeeds(orch: Orchestrator)
     mock_streaming = AsyncMock(side_effect=[sigkill_resp, success_resp])
     mock_reset_provider = AsyncMock()
     object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset_provider)
 
     result = await normal_streaming(orch, SessionKey(chat_id=1), "Hello")
@@ -326,12 +326,12 @@ async def test_streaming_error_preserves_session(orch: Orchestrator) -> None:
         AsyncMock(return_value=_mock_response(is_error=True, result="Stream failed")),
     )
     mock_kill = AsyncMock(return_value=0)
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
 
     result = await normal_streaming(orch, SessionKey(chat_id=1), "Hello")
     assert "Session Error" in result.text
     assert "[opus]" in result.text
-    mock_kill.assert_called_once_with(1)
+    mock_kill.assert_called_once_with(1, None)
 
 
 async def test_streaming_error_with_model_override(orch: Orchestrator) -> None:
@@ -341,7 +341,7 @@ async def test_streaming_error_with_model_override(orch: Orchestrator) -> None:
         "execute_streaming",
         AsyncMock(return_value=_mock_response(is_error=True, result="Error")),
     )
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_session", AsyncMock())
 
     result = await normal_streaming(orch, SessionKey(chat_id=1), "Hello", model_override="sonnet")
@@ -490,7 +490,7 @@ async def test_normal_no_auto_retry_on_resume_failure(orch: Orchestrator) -> Non
     )
     mock_kill = AsyncMock(return_value=0)
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
 
     await normal(orch, SessionKey(chat_id=1), "Hello")
     assert mock_execute.call_count == 1
@@ -508,7 +508,7 @@ async def test_streaming_no_auto_retry_on_resume_failure(orch: Orchestrator) -> 
     )
     mock_kill = AsyncMock(return_value=0)
     object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
 
     await normal_streaming(orch, SessionKey(chat_id=1), "Hello")
     assert mock_streaming.call_count == 1
@@ -521,7 +521,7 @@ async def test_normal_no_retry_on_new_session_error(orch: Orchestrator) -> None:
     )
     mock_kill = AsyncMock(return_value=0)
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
     object.__setattr__(orch._sessions, "reset_session", AsyncMock())
 
     await normal(orch, SessionKey(chat_id=1), "Hello")
@@ -536,7 +536,7 @@ async def test_streaming_no_retry_on_new_session_error(orch: Orchestrator) -> No
     )
     mock_kill = AsyncMock(return_value=0)
     object.__setattr__(orch._cli_service, "execute_streaming", mock_streaming)
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
     object.__setattr__(orch._sessions, "reset_session", AsyncMock())
 
     await normal_streaming(orch, SessionKey(chat_id=1), "Hello")
@@ -664,6 +664,18 @@ async def test_named_session_topic_abort(orch: Orchestrator) -> None:
     assert ns.status == "idle"
 
 
+async def test_named_session_flow_uses_ns_process_label(orch: Orchestrator) -> None:
+    ns = orch._named_sessions.create(1, "claude", "opus", "Setup")
+    orch._named_sessions.update_after_response(1, ns.name, "sess-named")
+    mock_execute = AsyncMock(return_value=_mock_response(result="Agent replied"))
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    await named_session_flow(orch, SessionKey(chat_id=1, topic_id=42), ns.name, "Hello")
+
+    request = mock_execute.call_args[0][0]
+    assert request.process_label == f"ns:{ns.name}"
+
+
 async def test_streaming_abort_discards_successful_response(orch: Orchestrator) -> None:
     """Even when streaming CLI responds successfully, abort flag causes empty result."""
     mock_streaming = AsyncMock(
@@ -682,7 +694,7 @@ async def test_normal_abort_on_new_session_returns_empty(orch: Orchestrator) -> 
         return_value=_mock_response(is_error=True, result="killed"),
     )
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_session", AsyncMock())
     orch._process_registry._aborted.add(1)
 
