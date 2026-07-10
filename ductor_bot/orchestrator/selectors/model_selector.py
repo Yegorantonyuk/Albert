@@ -353,11 +353,6 @@ async def switch_model(
     if validation_error is not None:
         return validation_error
 
-    resume_session_id, resume_message_count = _resume_state_for_provider(
-        active_session,
-        new_provider,
-    )
-
     # Resolve the effective effort for this switch. Reasoning effort is
     # per-session (like model): a topic change touches only that topic's
     # session; a main/DM change updates the global default. On a provider
@@ -377,18 +372,45 @@ async def switch_model(
     ):
         effort = "medium"
 
+    resume_source = active_session
     if not same_model:
         await orch._process_registry.kill_by_chat_topic(key.chat_id, key.topic_id)
-        if active_session is not None:
+        if is_topic:
+            # A topic never updates global config, so persist the picked target
+            # onto the session the next message will actually resolve.
+            # resolve_session_target creates it when missing and retargets or
+            # replaces it when stale, so the chosen model+effort survive instead
+            # of falling back to config on the next turn.
+            resolved, created = await orch._sessions.resolve_session_target(
+                key,
+                provider=new_provider,
+                model=model_id,
+                reasoning_effort=effort,
+            )
+            resume_source = None if created else resolved
+        elif active_session is not None:
             await orch._sessions.sync_session_target(
                 active_session,
                 provider=new_provider,
                 model=model_id,
                 reasoning_effort=effort,
             )
-    elif is_topic and active_session is not None and effort is not None:
+    elif is_topic and effort is not None:
         # effort-only change inside a topic: persist to the topic session only.
-        await orch._sessions.sync_session_target(active_session, reasoning_effort=effort)
+        if active_session is not None:
+            await orch._sessions.sync_session_target(active_session, reasoning_effort=effort)
+        else:
+            await orch._sessions.resolve_session_target(
+                key,
+                provider=new_provider,
+                model=model_id,
+                reasoning_effort=effort,
+            )
+
+    resume_session_id, resume_message_count = _resume_state_for_provider(
+        resume_source,
+        new_provider,
+    )
 
     if not is_topic:
         # Global config: update only from main chat / DM (not from topics).
