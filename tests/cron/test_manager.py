@@ -245,3 +245,77 @@ class TestPersistence:
 
         mgr = CronManager(jobs_path=jobs_path)
         assert mgr.list_jobs() == []
+
+
+class TestDeliveryTracking:
+    """#160: delivery status persists across save/reload."""
+
+    def test_delivery_failure_roundtrip(self, tmp_path: Path) -> None:
+        mgr = _make_manager(tmp_path)
+        mgr.add_job(_make_job("daily"))
+        mgr.update_run_status(
+            "daily",
+            status="success",
+            delivery_status="failed",
+            delivery_error="TelegramNetworkError",
+            result_text="the full result body",
+        )
+
+        reloaded = CronManager(jobs_path=tmp_path / "cron_jobs.json")
+        job = reloaded.get_job("daily")
+        assert job is not None
+        assert job.last_run_status == "success"
+        assert job.last_delivery_status == "failed"
+        assert job.last_delivery_error == "TelegramNetworkError"
+        assert job.last_result_text == "the full result body"
+
+    def test_successful_delivery_clears_preserved_result(self, tmp_path: Path) -> None:
+        mgr = _make_manager(tmp_path)
+        mgr.add_job(_make_job("daily"))
+        mgr.update_run_status(
+            "daily",
+            status="success",
+            delivery_status="failed",
+            delivery_error="TelegramNetworkError",
+            result_text="stale body",
+        )
+        mgr.update_run_status("daily", status="success", delivery_status="ok")
+
+        reloaded = CronManager(jobs_path=tmp_path / "cron_jobs.json")
+        job = reloaded.get_job("daily")
+        assert job is not None
+        assert job.last_delivery_status == "ok"
+        assert job.last_delivery_error == ""
+        assert job.last_result_text is None
+
+    def test_delivery_retry_state_roundtrip_and_recovery(self, tmp_path: Path) -> None:
+        mgr = _make_manager(tmp_path)
+        mgr.add_job(_make_job("daily"))
+        mgr.update_run_status(
+            "daily",
+            status="success",
+            delivery_status="failed",
+            delivery_error="offline",
+            result_text="preserved",
+        )
+        mgr.update_delivery_retry(
+            "daily",
+            delivered=False,
+            delivery_error="still offline",
+            next_attempt_at="2026-07-12T12:00:00+00:00",
+        )
+
+        reloaded = CronManager(jobs_path=tmp_path / "cron_jobs.json")
+        job = reloaded.get_job("daily")
+        assert job is not None
+        assert job.delivery_retry_attempts == 1
+        assert job.next_delivery_retry_at == "2026-07-12T12:00:00+00:00"
+        assert job.last_result_text == "preserved"
+
+        reloaded.update_delivery_retry("daily", delivered=True)
+        recovered = reloaded.get_job("daily")
+        assert recovered is not None
+        assert recovered.last_delivery_status == "ok"
+        assert recovered.last_result_text is None
+        assert recovered.delivery_retry_attempts == 0
+        assert recovered.next_delivery_retry_at is None
