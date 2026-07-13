@@ -21,6 +21,7 @@ def _make_service(**overrides: Any) -> CLIService:
         max_turns=overrides.pop("max_turns", None),
         max_budget_usd=overrides.pop("max_budget_usd", None),
         permission_mode=overrides.pop("permission_mode", "bypassPermissions"),
+        docker_container=overrides.pop("docker_container", ""),
     )
     models = ModelRegistry()
 
@@ -158,3 +159,111 @@ async def test_stream_callbacks_dispatches_compact_boundary() -> None:
     assert text == ""
     assert result is None
     assert order == ["boundary", "status:None"]
+
+
+async def test_stream_callbacks_dispatches_thinking_text() -> None:
+    from ductor_bot.cli.service import _StreamCallbacks
+    from ductor_bot.cli.stream_events import ThinkingEvent
+
+    seen: list[str] = []
+    statuses: list[str | None] = []
+
+    async def on_thinking(text: str) -> None:
+        seen.append(text)
+
+    async def on_status(status: str | None) -> None:
+        statuses.append(status)
+
+    cbs = _StreamCallbacks(
+        on_text=None,
+        on_thinking=on_thinking,
+        on_tool=None,
+        on_status=on_status,
+    )
+    text, result = await cbs.dispatch(ThinkingEvent(type="assistant", text="step 1"))
+
+    assert text == ""
+    assert result is None
+    assert seen == ["step 1"]
+    assert statuses == ["thinking"]
+
+
+async def test_stream_callbacks_dispatch_tool_event() -> None:
+    from ductor_bot.cli.service import _StreamCallbacks
+
+    seen: list[ToolUseEvent] = []
+
+    async def on_tool(event: ToolUseEvent) -> None:
+        seen.append(event)
+
+    cbs = _StreamCallbacks(
+        on_text=None,
+        on_thinking=None,
+        on_tool=on_tool,
+        on_status=None,
+    )
+    event = ToolUseEvent(
+        type="assistant",
+        tool_name="WebFetch",
+        parameters={"url": "https://slack.dev/slack-thinking-steps-ai-agents/"},
+    )
+    text, result = await cbs.dispatch(event)
+
+    assert text == ""
+    assert result is None
+    assert seen == [event]
+
+
+def test_make_cli_uses_working_dir_resolver() -> None:
+    svc = _make_service(working_dir="/default/workspace")
+    svc.set_working_dir_resolver(lambda _req: "/projects/alpha")
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        svc._make_cli(AgentRequest(prompt="hi", chat_id=1, topic_id=5))
+
+    cli_config = mock_create.call_args.args[0]
+    assert cli_config.working_dir == "/projects/alpha"
+
+
+def test_make_cli_resolver_none_keeps_default_working_dir() -> None:
+    svc = _make_service(working_dir="/default/workspace")
+    svc.set_working_dir_resolver(lambda _req: None)
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        svc._make_cli(AgentRequest(prompt="hi", chat_id=1, topic_id=5))
+
+    cli_config = mock_create.call_args.args[0]
+    assert cli_config.working_dir == "/default/workspace"
+
+
+def test_make_cli_no_resolver_keeps_default_working_dir() -> None:
+    svc = _make_service(working_dir="/default/workspace")
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        svc._make_cli(AgentRequest(prompt="hi", chat_id=1))
+
+    cli_config = mock_create.call_args.args[0]
+    assert cli_config.working_dir == "/default/workspace"
+
+
+def test_make_cli_docker_mode_ignores_resolver() -> None:
+    svc = _make_service(working_dir="/default/workspace", docker_container="ductor-sandbox")
+    calls: list[AgentRequest] = []
+
+    def resolver(req: AgentRequest) -> str:
+        calls.append(req)
+        return "/projects/alpha"
+
+    svc.set_working_dir_resolver(resolver)
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        svc._make_cli(AgentRequest(prompt="hi", chat_id=1, topic_id=5))
+
+    cli_config = mock_create.call_args.args[0]
+    assert cli_config.working_dir == "/default/workspace"
+    assert calls == []  # resolver must not even be consulted in docker mode
+
+
+def test_docker_enabled_property() -> None:
+    assert _make_service().docker_enabled is False
+    assert _make_service(docker_container="ductor-sandbox").docker_enabled is True
