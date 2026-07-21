@@ -60,6 +60,7 @@ from ductor_bot.messenger.telegram.message_dispatch import (
     StreamingDispatch,
     _is_empty_response,
     run_non_streaming_message,
+    run_status_message,
     run_streaming_message,
 )
 from ductor_bot.messenger.telegram.middleware import (
@@ -1363,6 +1364,21 @@ class TelegramBot:
         self, message: Message, key: SessionKey, text: str, *, thread_id: int | None = None
     ) -> str:
         """Streaming flow: coalescer -> stream editor -> Telegram."""
+        if self._config.streaming.mode == "status":
+            return await run_status_message(
+                StreamingDispatch(
+                    bot=self._bot,
+                    orchestrator=self._orch,
+                    message=message,
+                    key=key,
+                    text=text,
+                    streaming_cfg=self._config.streaming,
+                    allowed_roots=self.file_roots(self._orch.paths),
+                    thread_id=thread_id,
+                    scene_config=self._config.scene,
+                ),
+            )
+
         on_tool_reaction = None
         if self._config.scene.progress_reactions:
             async def on_tool_reaction() -> None:

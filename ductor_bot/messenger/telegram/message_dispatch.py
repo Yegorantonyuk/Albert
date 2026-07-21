@@ -14,6 +14,7 @@ from ductor_bot.messenger.telegram.sender import (
     send_files_from_text,
     send_rich,
 )
+from ductor_bot.messenger.telegram.status_line import StatusLineEditor
 from ductor_bot.messenger.telegram.streaming import create_stream_editor
 from ductor_bot.messenger.telegram.typing import TypingContext
 from ductor_bot.orchestrator.registry import OrchestratorResult
@@ -110,6 +111,82 @@ async def run_non_streaming_message(
         result.text,
         SendRichOpts(
             reply_to_message_id=reply_id,
+            allowed_roots=dispatch.allowed_roots,
+            thread_id=dispatch.thread_id,
+        ),
+    )
+    return result.text
+
+
+async def run_status_message(
+    dispatch: StreamingDispatch,
+) -> str:
+    """Execute one turn showing a live status line; deliver the final answer as one message.
+
+    No response text is streamed — a single status message tracks activity
+    (Thinking / tool / Writing lines) and is deleted before the final answer
+    is sent via the regular non-streaming delivery path, so duplicate replies
+    are impossible by construction.
+    """
+    logger.info("Status-line flow started")
+
+    editor = StatusLineEditor(
+        dispatch.bot,
+        dispatch.key.chat_id,
+        reply_to=dispatch.message,
+        thread_id=dispatch.thread_id,
+    )
+    writing = False
+
+    async def on_text(_delta: str) -> None:
+        nonlocal writing
+        if not writing:
+            writing = True
+            await editor.note_activity("✍️", "Writing")
+
+    async def on_tool(tool_name: str) -> None:
+        nonlocal writing
+        writing = False
+        await editor.note_tool(tool_name)
+
+    async def on_system(status: str | None) -> None:
+        nonlocal writing
+        system_map: dict[str, tuple[str, str]] = {
+            "thinking": ("🤔", "Thinking"),
+            "compacting": ("🗜", "Compacting"),
+            "recovering": ("♻️", "Recovering"),
+        }
+        display = system_map.get(status or "")
+        if display is None:
+            return
+        writing = False
+        await editor.note_activity(display[0], display[1])
+
+    try:
+        async with TypingContext(
+            dispatch.bot, dispatch.key.chat_id, thread_id=dispatch.thread_id
+        ):
+            result = await dispatch.orchestrator.handle_message_streaming(
+                dispatch.key,
+                dispatch.text,
+                on_text_delta=on_text,
+                on_tool_activity=on_tool,
+                on_system_status=on_system,
+            )
+    finally:
+        await editor.finalize()
+
+    footer = _build_footer(result, dispatch.scene_config)
+    result.text += footer
+    if _is_empty_response(result.text):
+        logger.warning("Empty or no-op response from model, sending fallback")
+        result.text = "_(error: no response from model — please try again)_"
+    await send_rich(
+        dispatch.bot,
+        dispatch.key.chat_id,
+        result.text,
+        SendRichOpts(
+            reply_to_message_id=dispatch.message.message_id,
             allowed_roots=dispatch.allowed_roots,
             thread_id=dispatch.thread_id,
         ),

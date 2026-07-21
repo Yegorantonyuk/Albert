@@ -49,6 +49,7 @@ class StreamingConfig(BaseModel):
     """Settings for streaming response output."""
 
     enabled: bool = True
+    mode: str = "text"  # "text" = stream response text; "status" = live activity status line only
     min_chars: int = 200
     max_chars: int = 4000
     idle_ms: int = 800
