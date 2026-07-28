@@ -17,6 +17,7 @@ from rich.console import Console
 from ductor_bot.cli_commands.agents import cmd_agents as _cmd_agents
 from ductor_bot.cli_commands.api_cmd import cmd_api as _cmd_api
 from ductor_bot.cli_commands.docker import cmd_docker as _cmd_docker
+from ductor_bot.cli_commands.gateway_cmd import cmd_gateway as _cmd_gateway
 from ductor_bot.cli_commands.install import cmd_install as _cmd_install
 from ductor_bot.cli_commands.lifecycle import (
     cmd_restart as _cmd_restart,
@@ -326,6 +327,7 @@ _COMMANDS: dict[str, str] = {
     "service": "service",
     "docker": "docker",
     "api": "api",
+    "gateway": "gateway",
     "agents": "agents",
     "install": "install",
 }
@@ -356,6 +358,7 @@ def main() -> None:
         "service": lambda: _cmd_service(args),
         "docker": lambda: _cmd_docker(args),
         "api": lambda: _cmd_api(args),
+        "gateway": lambda: _cmd_gateway(args),
         "agents": lambda: _cmd_agents(args),
         "install": lambda: _cmd_install(args),
     }

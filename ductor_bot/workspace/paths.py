@@ -68,6 +68,25 @@ class DuctorPaths:
         return self.ductor_home / "logs"
 
     @property
+    def gateway_dir(self) -> Path:
+        """Gateway state: paired devices, client-certificate authority."""
+        return self.ductor_home / "gateway"
+
+    @property
+    def devices_path(self) -> Path:
+        return self.gateway_dir / "devices.json"
+
+    @property
+    def gateway_ca_dir(self) -> Path:
+        """Client-certificate authority material (private key is 0600)."""
+        return self.gateway_dir / "ca"
+
+    @property
+    def audit_log_path(self) -> Path:
+        """Append-only audit trail; also backs the app's Activity feed."""
+        return self.logs_dir / "audit.jsonl"
+
+    @property
     def cron_tasks_dir(self) -> Path:
         return self.workspace / "cron_tasks"
 

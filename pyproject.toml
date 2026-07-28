@@ -59,13 +59,18 @@ lint = [
 api = [
     "PyNaCl>=1.6.2",
 ]
+gateway = [
+    "PyNaCl>=1.6.2",
+    "PyJWT>=2.8.0",
+    "cryptography>=42.0.0",
+]
 matrix = [
     "matrix-nio>=0.25.0",
 ]
 discord = [
     "discord.py>=2.3.0",
 ]
-dev = ["ductor[test,lint,api,matrix]"]
+dev = ["ductor[test,lint,api,gateway,matrix]"]
 
 [project.urls]
 Homepage = "https://ductor.dev"

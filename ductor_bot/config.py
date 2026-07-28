@@ -239,6 +239,25 @@ class ApiConfig(BaseModel):
     allow_public: bool = False
 
 
+class GatewayConfig(BaseModel):
+    """Settings for the authenticated app gateway.
+
+    Unlike ``ApiConfig`` this binds to loopback by default and expects a reverse
+    proxy in front of it, because the outer of its two auth layers (client
+    certificates) is enforced at TLS termination.
+
+    ``trusted_proxies`` must list the proxy's address whenever one is used.
+    Without it the gateway cannot tell a real client from a forwarded one and
+    refuses to pair rather than guessing -- see ``gateway.devices.resolve_client_ip``.
+    """
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8750
+    trusted_proxies: list[str] = Field(default_factory=list)
+    token_ttl_seconds: int = 15 * 60
+
+
 def deep_merge_config(
     user: dict[str, object],
     defaults: dict[str, object],
@@ -309,6 +328,7 @@ class AgentConfig(BaseModel):
     cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
     webhooks: WebhookConfig = Field(default_factory=WebhookConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
+    gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     cli_parameters: CLIParametersConfig = Field(default_factory=CLIParametersConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)

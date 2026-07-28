@@ -110,6 +110,10 @@ async def create_orchestrator(
     if config.api.enabled:
         await start_api_server(orch, config, paths)
 
+    # Authenticated app gateway (loopback + reverse proxy)
+    if config.gateway.enabled:
+        await start_gateway_server(orch, config, paths)
+
     await orch._observers.start_config_reloader(
         on_hot_reload=orch._on_config_hot_reload,
         on_restart_needed=lambda fields: logger.warning(
@@ -118,6 +122,58 @@ async def create_orchestrator(
     )
 
     return orch
+
+
+async def start_gateway_server(
+    orch: Orchestrator,
+    config: AgentConfig,
+    paths: DuctorPaths,
+) -> None:
+    """Initialize and start the authenticated app gateway.
+
+    Kept independent of ``ApiServer``: the gateway owns device identity and
+    admission, while the API server owns the chat session. A failure to start
+    the gateway must never take the messaging transports down with it, so any
+    error here is logged and swallowed.
+    """
+    try:
+        from ductor_bot.gateway.audit import AuditLog
+        from ductor_bot.gateway.ca import ClientCertificateAuthority
+        from ductor_bot.gateway.devices import DeviceRegistry
+        from ductor_bot.gateway.server import GatewayServer
+        from ductor_bot.gateway.tokens import TokenIssuer, load_or_create_secret
+    except ImportError:
+        logger.warning(
+            "Gateway enabled but its dependencies are missing. "
+            "Install with: pip install albert[gateway]"
+        )
+        return
+
+    gateway = GatewayServer(
+        devices=DeviceRegistry(paths.devices_path),
+        tokens=TokenIssuer(
+            load_or_create_secret(paths.gateway_dir / "token.secret"),
+            ttl_seconds=config.gateway.token_ttl_seconds,
+        ),
+        audit=AuditLog(paths.audit_log_path),
+        ca=ClientCertificateAuthority(paths.gateway_ca_dir),
+        host=config.gateway.host,
+        port=config.gateway.port,
+        trusted_proxies=tuple(config.gateway.trusted_proxies),
+        admin_secret=load_or_create_secret(paths.gateway_dir / "admin.secret"),
+    )
+
+    try:
+        await gateway.start()
+    except OSError:
+        logger.exception("Gateway failed to start on port %d", config.gateway.port)
+        return
+
+    orch._gateway_stop = gateway.stop
+    logger.info(
+        "Gateway ready. Trusted proxies: %s",
+        ", ".join(config.gateway.trusted_proxies) or "none (direct access only)",
+    )
 
 
 async def start_api_server(
@@ -193,6 +249,8 @@ async def shutdown(orch: Orchestrator) -> None:
         logger.info("Shutdown terminated %d active CLI process(es)", killed)
     if orch._api_stop is not None:
         await orch._api_stop()
+    if orch._gateway_stop is not None:
+        await orch._gateway_stop()
     await asyncio.to_thread(cleanup_ductor_links, orch._paths)
     await orch._observers.stop_all()
     if orch._docker:
