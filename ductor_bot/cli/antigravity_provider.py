@@ -59,8 +59,17 @@ class AntigravityCLI(BaseCLI):
         resume_session: str | None = None,
         continue_session: bool = False,
     ) -> list[str]:
-        """Build the ``agy --print`` command list (prompt appended by caller)."""
-        cmd = [self._cli, "--print"]
+        """Build the ``agy --print`` command list (prompt appended by caller).
+
+        ``--print`` CONSUMES THE NEXT TOKEN as its value (agy 1.1.x), so it must
+        stay last: anything appended after it is swallowed as the prompt and the
+        real prompt degrades into a stray positional arg. Upstream emits
+        ``agy --print --dangerously-skip-permissions <prompt>``, which silently
+        runs "--dangerously-skip-permissions" as the prompt and then dies with
+        "a tool required the command permission ... so it was auto-denied".
+        Every other flag therefore goes BEFORE ``--print``.
+        """
+        cmd = [self._cli]
 
         if self._config.model and self._config.model not in ANTIGRAVITY_MODELS:
             cmd += ["--model", self._config.model]
@@ -76,6 +85,7 @@ class AntigravityCLI(BaseCLI):
             cmd += ["--dangerously-skip-permissions"]
 
         cmd.extend(self._config.cli_parameters)
+        cmd.append("--print")
         return cmd
 
     def _host_command(self, cmd: list[str]) -> tuple[list[str], str]:

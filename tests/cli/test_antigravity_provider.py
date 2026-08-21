@@ -23,7 +23,10 @@ def test_antigravity_command_uses_print_and_conversation() -> None:
 
     cmd = cli._build_command(resume_session="conv-1")
 
-    assert cmd[:2] == ["agy", "--print"]
+    # ``--print`` consumes the next token as its value (agy 1.1.x), so it must
+    # be LAST -- anything after it is swallowed as the prompt.
+    assert cmd[0] == "agy"
+    assert cmd[-1] == "--print"
     assert "--model" not in cmd
     assert "--conversation" in cmd
     assert "conv-1" in cmd
@@ -58,7 +61,7 @@ def test_antigravity_command_includes_cli_parameters() -> None:
 
     cmd = cli._build_command()
 
-    assert cmd[-2:] == ["--log-file", "agy.log"]
+    assert cmd[-3:] == ["--log-file", "agy.log", "--print"]
 
 
 def test_antigravity_ignores_docker_container() -> None:
@@ -168,3 +171,21 @@ class TestAgentEnvInjection:
         assert env["DUCTOR_AGENT_NAME"] == "main"
         assert env["DUCTOR_CHAT_ID"] == "77"
         assert "DUCTOR_HOME" in env
+
+
+def test_antigravity_print_stays_last_with_bypass() -> None:
+    """Regression: upstream emitted ``--print --dangerously-skip-permissions``.
+
+    ``--print`` takes the next token as its value, so that layout ran the flag
+    itself as the prompt and every call died with "a tool required the command
+    permission ... auto-denied". Guard the ordering, not just the presence.
+    """
+    cli = AntigravityCLI(
+        CLIConfig(provider="antigravity", permission_mode="bypassPermissions")
+    )
+
+    cmd = cli._build_command()
+
+    assert cmd[-1] == "--print"
+    assert "--dangerously-skip-permissions" in cmd
+    assert cmd.index("--dangerously-skip-permissions") < cmd.index("--print")
