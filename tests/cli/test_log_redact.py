@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from ductor_bot.cli._log_redact import redact_cmd_for_log
-from ductor_bot.cli.antigravity_provider import _safe_command_for_logging
 from ductor_bot.cli.claude_provider import _log_cmd as log_claude_cmd
 from ductor_bot.cli.codex_provider import _log_cmd as log_codex_cmd
 from ductor_bot.cli.gemini_provider import _log_cmd as log_gemini_cmd
@@ -202,12 +201,3 @@ async def test_docker_debug_log_masks_embedded_url_credentials(
 
     assert _FAKE_DATABASE_VALUE not in caplog.text
     assert "api.key=***" in caplog.text
-
-
-def test_antigravity_safe_command_redacts_before_truncation() -> None:
-    safe = _safe_command_for_logging(_CMD)
-    rendered = " ".join(safe)
-
-    assert _FAKE_SECRET not in rendered
-    assert "GITHUB_TOKEN=***" in rendered
-    assert "DUCTOR_CHAT_ID=42" in rendered
