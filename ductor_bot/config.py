@@ -212,14 +212,6 @@ class MemoryCompactionConfig(BaseModel):
         return self
 
 
-class MemoryReflectionConfig(BaseModel):
-    """Settings for the periodic memory reflection hook (#65)."""
-
-    enabled: bool = False
-    every_n_messages: int = 10
-    prompt: str = _DEFAULT_MEMORY_REFLECTION_PROMPT
-
-
 class ImageConfig(BaseModel):
     """Settings for incoming image processing."""
 
