@@ -238,7 +238,12 @@ class CodexCLI(BaseCLI):
         raw = stdout.decode(errors="replace").strip()
         if not raw:
             logger.error("Codex returned empty output (exit=%s)", returncode)
-            return CLIResponse(result="", is_error=True, returncode=returncode, stderr=stderr_text)
+            return CLIResponse(
+                result=_strip_codex_stdin_notices(stderr_text),
+                is_error=True,
+                returncode=returncode,
+                stderr=stderr_text,
+            )
 
         is_error = returncode != 0
         result_text, thread_id, usage = parse_codex_jsonl(raw)
