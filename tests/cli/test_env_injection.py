@@ -60,7 +60,7 @@ def test_subprocess_env_sets_task_id_for_task_label(tmp_path: Path) -> None:
 
     config = CLIConfig(working_dir=str(workspace), process_label="task:abc123")
     clear_cache()
-    env = build_subprocess_env(config)
+    env = _build_subprocess_env(config)
 
     assert env is not None
     assert env["DUCTOR_TASK_ID"] == "abc123"
@@ -74,7 +74,7 @@ def test_subprocess_env_omits_task_id_for_other_labels(tmp_path: Path) -> None:
     for label in ("main", "ns:build", "interagent:worker"):
         config = CLIConfig(working_dir=str(workspace), process_label=label)
         clear_cache()
-        env = build_subprocess_env(config)
+        env = _build_subprocess_env(config)
 
         assert env is not None
         assert "DUCTOR_TASK_ID" not in env
