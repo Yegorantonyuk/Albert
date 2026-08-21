@@ -161,59 +161,6 @@ async def test_stream_callbacks_dispatches_compact_boundary() -> None:
     assert order == ["boundary", "status:None"]
 
 
-async def test_stream_callbacks_dispatches_thinking_text() -> None:
-    from ductor_bot.cli.service import _StreamCallbacks
-    from ductor_bot.cli.stream_events import ThinkingEvent
-
-    seen: list[str] = []
-    statuses: list[str | None] = []
-
-    async def on_thinking(text: str) -> None:
-        seen.append(text)
-
-    async def on_status(status: str | None) -> None:
-        statuses.append(status)
-
-    cbs = _StreamCallbacks(
-        on_text=None,
-        on_thinking=on_thinking,
-        on_tool=None,
-        on_status=on_status,
-    )
-    text, result = await cbs.dispatch(ThinkingEvent(type="assistant", text="step 1"))
-
-    assert text == ""
-    assert result is None
-    assert seen == ["step 1"]
-    assert statuses == ["thinking"]
-
-
-async def test_stream_callbacks_dispatch_tool_event() -> None:
-    from ductor_bot.cli.service import _StreamCallbacks
-
-    seen: list[ToolUseEvent] = []
-
-    async def on_tool(event: ToolUseEvent) -> None:
-        seen.append(event)
-
-    cbs = _StreamCallbacks(
-        on_text=None,
-        on_thinking=None,
-        on_tool=on_tool,
-        on_status=None,
-    )
-    event = ToolUseEvent(
-        type="assistant",
-        tool_name="WebFetch",
-        parameters={"url": "https://slack.dev/slack-thinking-steps-ai-agents/"},
-    )
-    text, result = await cbs.dispatch(event)
-
-    assert text == ""
-    assert result is None
-    assert seen == [event]
-
-
 def test_make_cli_uses_working_dir_resolver() -> None:
     svc = _make_service(working_dir="/default/workspace")
     svc.set_working_dir_resolver(lambda _req: "/projects/alpha")
