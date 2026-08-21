@@ -75,16 +75,15 @@ def test_resolve_with_task_overrides(
     """Should apply task overrides over global config."""
     overrides = TaskOverrides(
         provider="codex",
-        model="gpt-4o-mini",
+        model="gpt-4o",
         reasoning_effort="low",
     )
 
     result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
     assert result.provider == "codex"
-    assert result.model == "gpt-4o-mini"
-    # gpt-4o-mini doesn't support reasoning, should be empty
-    assert result.reasoning_effort == ""
+    assert result.model == "gpt-4o"
+    assert result.reasoning_effort == "low"
     assert result.cli_parameters == []
 
 
@@ -140,20 +139,23 @@ def test_resolve_codex_reasoning_effort(
     assert result.reasoning_effort == "high"
 
 
-def test_resolve_codex_effort_fallback(
+def test_resolve_codex_effort_rejects_unsupported_model(
     base_config: AgentConfig, codex_cache: CodexModelCache
 ) -> None:
-    """Should fall back to empty reasoning effort for non-reasoning models."""
+    """An explicit effort on a non-reasoning model is an error, not a silent drop.
+
+    dccc9c9 changed this from "fall back to empty": a job that explicitly asks
+    for an effort the model cannot honour should fail loudly rather than run
+    with different settings than requested.
+    """
     overrides = TaskOverrides(
         provider="codex",
         model="gpt-4o-mini",
-        reasoning_effort="high",  # Attempt to set, but model doesn't support
+        reasoning_effort="high",
     )
 
-    result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
-
-    assert result.model == "gpt-4o-mini"
-    assert result.reasoning_effort == ""
+    with pytest.raises(DuctorError, match="Invalid reasoning effort"):
+        resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
 
 def test_resolve_claude_carries_reasoning(

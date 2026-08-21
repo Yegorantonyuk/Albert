@@ -452,20 +452,20 @@ class Orchestrator:
         return provider
 
     async def reset_active_provider_session(self, key: SessionKey) -> str:
-        """Reset only the active provider session bucket for a given key."""
-        active = await self._sessions.get_active(key)
-        if active is not None:
-            provider = active.provider
-            model = active.model
-        else:
-            model, provider = self.resolve_runtime_target(self._config.model)
+        """Reset the active provider bucket to the config-default model.
 
+        ``/new`` acts as a "factory reset" -- the bucket cleared is the one
+        tied to ``config.model`` (resolved via provider mapping), not the
+        bucket the user last switched to via ``/model``. This matches the
+        behaviour users expect from a reset command (issue #82).
+        """
+        model, provider = self.resolve_runtime_target(self._config.model)
         await self._sessions.reset_provider_session(
             key,
             provider=provider,
             model=model,
         )
-        logger.info("Active provider session reset provider=%s", provider)
+        logger.info("Active provider session reset provider=%s model=%s", provider, model)
         return provider
 
     async def abort(self, chat_id: int, topic_id: int | None = None) -> int:

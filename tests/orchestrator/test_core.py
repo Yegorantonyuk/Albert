@@ -44,23 +44,32 @@ async def test_new_command(orch: Orchestrator) -> None:
 
 
 async def test_new_command_resets_only_active_provider_bucket(orch: Orchestrator) -> None:
+    """#82: /new resets the CONFIG-DEFAULT provider's bucket, not whatever the
+    user last switched to via /model. The sibling bucket is preserved.
+
+    Config default here is ``opus`` (claude), so after /new the claude bucket
+    is cleared and the codex bucket the user had switched to survives."""
     key = SessionKey(chat_id=1)
+    # Populate the claude (config default) bucket.
     claude, _ = await orch._sessions.resolve_session(key, provider="claude", model="opus")
     claude.session_id = "claude-sid"
     await orch._sessions.update_session(claude)
 
+    # Populate the codex bucket (user switched to codex via /model).
     codex, _ = await orch._sessions.resolve_session(key, provider="codex", model="gpt-5.2-codex")
     codex.session_id = "codex-sid"
     await orch._sessions.update_session(codex)
 
     result = await orch.handle_message(key, "/new")
-    assert "Session reset for Codex" in result.text
+    # Config default provider (claude) is reported, not the currently active provider (codex).
+    assert "Session reset for Claude" in result.text
 
     active = await orch._sessions.get_active(key)
     assert active is not None
-    assert "claude" in active.provider_sessions
-    assert active.provider_sessions["claude"].session_id == "claude-sid"
-    assert "codex" not in active.provider_sessions
+    # Claude bucket cleared; codex bucket preserved.
+    assert "claude" not in active.provider_sessions
+    assert "codex" in active.provider_sessions
+    assert active.provider_sessions["codex"].session_id == "codex-sid"
 
 
 async def test_reset_command_resets_current_non_default_provider_bucket(
