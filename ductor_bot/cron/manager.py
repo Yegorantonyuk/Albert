@@ -201,8 +201,20 @@ class CronManager:
             logger.info("Cron jobs bulk update: enabled=%s changed=%d", enabled, changed)
         return changed
 
-    def update_run_status(self, job_id: str, *, status: str) -> None:
-        """Update last_run_at and last_run_status for a job."""
+    def update_run_status(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        delivery_status: str | None = None,
+        delivery_error: str = "",
+        result_text: str | None = None,
+    ) -> None:
+        """Update last run and delivery tracking for a job (#160).
+
+        *result_text* is only passed on delivery failure so the original
+        output can be resent without re-running the job.
+        """
         job = self.get_job(job_id)
         if job is None:
             return
