@@ -448,7 +448,13 @@ async def normal(
     _begin_inflight(orch, request, session, is_recovery=is_recovery)
     try:
         response = await orch._cli_service.execute(request)
-        session_recovered = False
+        outcome = await _maybe_recover_session(
+            orch, key, text, request, session, response, model_override=model_override
+        )
+        if outcome.failed_result is not None:
+            return outcome.failed_result
+        request, session, response = outcome.request, outcome.session, outcome.response
+        session_recovered = outcome.session_recovered
         _reg = orch._process_registry
         if (
             _reg.was_aborted(key.chat_id)
@@ -456,6 +462,7 @@ async def normal(
             or _reg.was_interrupted(key.chat_id)
         ):
             _reg.clear_interrupt(key.chat_id)
+            await _preserve_session_from_response(orch, session, response, reason="abort")
             logger.info("Normal flow aborted/interrupted by user")
             return OrchestratorResult(text="")
         if response.timed_out:
@@ -465,6 +472,7 @@ async def normal(
                 logger.warning("recovery.sigkill chat=%s action=user-retry", key.chat_id)
                 return OrchestratorResult(text=_sigkill_user_msg(), stream_fallback=True)
             model_name, provider_name = _request_target(orch, request)
+            await _preserve_session_from_response(orch, session, response, reason="error")
             return await _reset_on_error(
                 orch,
                 key,
@@ -516,6 +524,20 @@ async def normal_streaming(
             on_system_status=cb.on_system_status,
             on_compact_boundary=_on_compact if orch._memory_flusher is not None else None,
         )
+        outcome = await _maybe_recover_session(
+            orch,
+            key,
+            text,
+            request,
+            session,
+            response,
+            model_override=model_override,
+            streaming=True,
+            cbs=cb,
+        )
+        if outcome.failed_result is not None:
+            return outcome.failed_result
+        request, session, response = outcome.request, outcome.session, outcome.response
         _reg = orch._process_registry
         if (
             _reg.was_aborted(key.chat_id)
@@ -523,6 +545,7 @@ async def normal_streaming(
             or _reg.was_interrupted(key.chat_id)
         ):
             _reg.clear_interrupt(key.chat_id)
+            await _preserve_session_from_response(orch, session, response, reason="abort")
             logger.info("Streaming flow aborted/interrupted by user")
             return OrchestratorResult(text="")
         if response.timed_out:
@@ -532,6 +555,7 @@ async def normal_streaming(
                 logger.warning("recovery.sigkill chat=%s action=user-retry", key.chat_id)
                 return OrchestratorResult(text=_sigkill_user_msg(), stream_fallback=True)
             model_name, provider_name = _request_target(orch, request)
+            await _preserve_session_from_response(orch, session, response, reason="error")
             return await _reset_on_error(
                 orch,
                 key,

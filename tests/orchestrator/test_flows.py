@@ -13,6 +13,7 @@ from ductor_bot.orchestrator.flows import (
     _finish_normal,
     _strip_ack_token,
     _update_session,
+    heartbeat_flow,
     named_session_flow,
     normal,
     normal_streaming,
