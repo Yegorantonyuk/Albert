@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from ductor_bot.config import (
     _GEMINI_ALIASES,
+    ANTIGRAVITY_MODELS,
     CLAUDE_MODELS,
     CLAUDE_SUPPORTED_EFFORTS,
     get_gemini_models,
@@ -34,6 +35,23 @@ def _validate_gemini_model(model: str) -> None:
         msg = (
             f"Invalid Gemini model: {model}. Must use a Gemini model ID "
             "(e.g. gemini-2.5-pro) or Gemini alias."
+        )
+        raise DuctorError(msg)
+
+
+def _validate_antigravity_model(model: str) -> None:
+    """Validate an Antigravity model ID.
+
+    agy accepts arbitrary model slugs (``agy models`` lists what's currently
+    available), so there is no fixed allowlist to check against beyond the
+    known ``ANTIGRAVITY_MODELS`` set — only reject an empty/blank model.
+    """
+    if model in ANTIGRAVITY_MODELS:
+        return
+    if not model or not model.strip():
+        msg = (
+            f"Invalid Antigravity model: {model!r}. "
+            "Must be a non-empty model ID (see `agy models`)."
         )
         raise DuctorError(msg)
 
@@ -148,6 +166,8 @@ def resolve_cli_config(
             raise DuctorError(msg)
     elif provider == "gemini":
         _validate_gemini_model(model)
+    elif provider == "antigravity":
+        _validate_antigravity_model(model)
     else:  # codex
         if codex_cache is None:
             msg = "Codex cache is required for Codex model validation"

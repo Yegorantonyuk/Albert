@@ -10,10 +10,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from shutil import which
 
+from ductor_bot.cli.antigravity_events import parse_antigravity_json
 from ductor_bot.cli.codex_events import parse_codex_jsonl
 from ductor_bot.cli.gemini_events import parse_gemini_json
 from ductor_bot.cli.gemini_utils import find_gemini_cli
 from ductor_bot.cli.param_resolver import TaskExecutionConfig
+from ductor_bot.config import ANTIGRAVITY_MODELS
 from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
 from ductor_bot.infra.process_tree import force_kill_process_tree
 
@@ -71,6 +73,16 @@ def parse_gemini_result(stdout: bytes) -> str:
     if not raw:
         return ""
     return parse_gemini_json(raw) or raw[:2000]
+
+
+def parse_antigravity_result(stdout: bytes) -> str:
+    """Extract result text from Antigravity CLI (agy) JSON output."""
+    if not stdout:
+        return ""
+    raw = stdout.decode(errors="replace").strip()
+    if not raw:
+        return ""
+    return parse_antigravity_json(raw) or raw[:2000]
 
 
 def parse_codex_result(stdout: bytes) -> str:
@@ -150,6 +162,35 @@ def _build_gemini_cmd(exec_config: TaskExecutionConfig, prompt: str) -> OneShotC
     return OneShotCommand(cmd=cmd, stdin_input=prompt.encode())
 
 
+def _build_antigravity_cmd(exec_config: TaskExecutionConfig, prompt: str) -> OneShotCommand | None:
+    """Build an Antigravity CLI (agy) command for one-shot cron execution.
+
+    ``--print`` CONSUMES THE NEXT TOKEN as its value (agy 1.1.x), so it must
+    stay last with the prompt immediately after it. See
+    ``ductor_bot.cli.antigravity_provider.AntigravityCLI._build_command`` for
+    the same ordering constraint on the interactive path.
+    """
+    cli = which("agy")
+    if not cli:
+        return None
+    cmd = [cli]
+
+    if exec_config.model and exec_config.model not in ANTIGRAVITY_MODELS:
+        cmd += ["--model", exec_config.model]
+
+    if exec_config.permission_mode == "bypassPermissions":
+        cmd.append("--dangerously-skip-permissions")
+
+    cmd += ["--output-format", "json"]
+
+    # Add extra CLI parameters
+    cmd.extend(exec_config.cli_parameters)
+
+    # --print takes the prompt as its value; keep it last.
+    cmd += ["--print", prompt]
+    return OneShotCommand(cmd=cmd)
+
+
 def _build_codex_cmd(exec_config: TaskExecutionConfig, prompt: str) -> OneShotCommand | None:
     """Build a Codex CLI command for one-shot cron execution."""
     cli = which("codex")
@@ -183,12 +224,14 @@ _CMD_BUILDERS: dict[str, _CmdBuilder] = {
     "claude": _build_claude_cmd,
     "gemini": _build_gemini_cmd,
     "codex": _build_codex_cmd,
+    "antigravity": _build_antigravity_cmd,
 }
 
 _RESULT_PARSERS: dict[str, _ResultParser] = {
     "claude": parse_claude_result,
     "gemini": parse_gemini_result,
     "codex": parse_codex_result,
+    "antigravity": parse_antigravity_result,
 }
 
 

@@ -18,6 +18,21 @@ def test_antigravity_batch_json_extracts_common_content_keys() -> None:
     assert parse_antigravity_json("plain") == "plain"
 
 
+def test_antigravity_batch_json_extracts_output_format_json_envelope() -> None:
+    """``agy --output-format json`` wraps the answer under "response", not
+
+    "result"/"content"/"text"/"message" — confirmed via a live ``agy`` run.
+    Regression guard: this key was missing and silently fell back to
+    ``str(parsed)`` (a stringified Python dict) instead of the real answer.
+    """
+    raw = (
+        '{"conversation_id":"572922bc-4179-4800-bdd5-936958faf367",'
+        '"status":"SUCCESS","response":"TEST\\n","duration_seconds":2.85,'
+        '"num_turns":1,"usage":{"input_tokens":13870,"output_tokens":24}}'
+    )
+    assert parse_antigravity_json(raw) == "TEST\n"
+
+
 def test_antigravity_command_uses_print_and_conversation() -> None:
     cli = AntigravityCLI(CLIConfig(provider="antigravity", model="antigravity-default"))
 

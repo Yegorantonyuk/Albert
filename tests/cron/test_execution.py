@@ -13,6 +13,7 @@ from ductor_bot.cron.execution import (
     enrich_instruction,
     execute_one_shot,
     indent,
+    parse_antigravity_result,
     parse_claude_result,
     parse_codex_result,
     parse_gemini_result,
@@ -144,6 +145,86 @@ class TestBuildCmd:
         assert result.cmd[0] == "/usr/bin/claude"
         assert result.stdin_input is None
 
+    def test_antigravity_provider(self) -> None:
+        exec_config = TaskExecutionConfig(
+            provider="antigravity",
+            model="antigravity-default",
+            reasoning_effort="",
+            cli_parameters=[],
+            permission_mode="bypassPermissions",
+            working_dir="/tmp",
+            file_access="all",
+        )
+        with patch("ductor_bot.cron.execution.which", return_value="/usr/bin/agy"):
+            result = build_cmd(exec_config, "hello")
+        assert result is not None
+        assert result.cmd[0] == "/usr/bin/agy"
+        assert "--dangerously-skip-permissions" in result.cmd
+        assert "--output-format" in result.cmd
+        assert "json" in result.cmd
+        # The provider-level default model is not passed via --model.
+        assert "--model" not in result.cmd
+        # Prompt goes in as --print's value, not stdin.
+        assert result.stdin_input is None
+        assert result.cmd[-1] == "hello"
+        assert result.cmd[-2] == "--print"
+
+    def test_antigravity_returns_none_when_cli_missing(self) -> None:
+        exec_config = TaskExecutionConfig(
+            provider="antigravity",
+            model="antigravity-default",
+            reasoning_effort="",
+            cli_parameters=[],
+            permission_mode="plan",
+            working_dir="/tmp",
+            file_access="all",
+        )
+        with patch("ductor_bot.cron.execution.which", return_value=None):
+            assert build_cmd(exec_config, "hello") is None
+
+    def test_antigravity_custom_model_adds_flag(self) -> None:
+        exec_config = TaskExecutionConfig(
+            provider="antigravity",
+            model="antigravity-custom-slug",
+            reasoning_effort="",
+            cli_parameters=[],
+            permission_mode="normal",
+            working_dir="/tmp",
+            file_access="all",
+        )
+        with patch("ductor_bot.cron.execution.which", return_value="/usr/bin/agy"):
+            result = build_cmd(exec_config, "hello")
+        assert result is not None
+        assert "--model" in result.cmd
+        assert "antigravity-custom-slug" in result.cmd
+        assert "--dangerously-skip-permissions" not in result.cmd
+
+    def test_antigravity_print_stays_last_with_prompt_immediately_after(self) -> None:
+        """Regression guard for the agy 1.1.x --print footgun.
+
+        --print consumes the very next token as its own value. Any flag
+        placed after --print silently becomes the prompt, the real prompt
+        degrades into a stray positional arg, and agy dies with a confusing
+        "auto-denied" permission error instead of a usage error. See
+        ductor_bot/cli/antigravity_provider.py::_build_command for the
+        interactive-path equivalent of this ordering rule.
+        """
+        exec_config = TaskExecutionConfig(
+            provider="antigravity",
+            model="antigravity-default",
+            reasoning_effort="",
+            cli_parameters=["--add-dir", "/extra"],
+            permission_mode="bypassPermissions",
+            working_dir="/tmp",
+            file_access="all",
+        )
+        with patch("ductor_bot.cron.execution.which", return_value="/usr/bin/agy"):
+            result = build_cmd(exec_config, "the actual prompt")
+        assert result is not None
+        assert result.cmd[-2] == "--print"
+        assert result.cmd[-1] == "the actual prompt"
+        assert result.cmd.index("--print") == len(result.cmd) - 2
+
 
 class TestExecuteOneShotStdin:
     """Test execute_one_shot stdin_input parameter."""
@@ -261,9 +342,34 @@ class TestParseGemini:
         assert parse_gemini_result(raw) == "Raw gemini output"
 
 
+class TestParseAntigravity:
+    def test_empty_bytes(self) -> None:
+        assert parse_antigravity_result(b"") == ""
+
+    def test_json_response(self) -> None:
+        import json
+
+        data = json.dumps({"result": "Result text"})
+        assert parse_antigravity_result(data.encode()) == "Result text"
+
+    def test_output_format_json_envelope(self) -> None:
+        """Real `agy --output-format json` shape: answer lives under "response"."""
+        import json
+
+        data = json.dumps({"status": "SUCCESS", "response": "TEST\n"})
+        assert parse_antigravity_result(data.encode()) == "TEST\n"
+
+    def test_non_json_returns_raw(self) -> None:
+        raw = b"Raw agy output"
+        assert parse_antigravity_result(raw) == "Raw agy output"
+
+
 class TestParseResult:
     def test_dispatches_to_gemini_parser(self) -> None:
         assert parse_result("gemini", b'{"result":"ok"}') == "ok"
+
+    def test_dispatches_to_antigravity_parser(self) -> None:
+        assert parse_result("antigravity", b'{"result":"ok"}') == "ok"
 
     def test_unknown_provider_falls_back_to_claude(self) -> None:
         assert parse_result("unknown", b'{"result":"fallback"}') == "fallback"

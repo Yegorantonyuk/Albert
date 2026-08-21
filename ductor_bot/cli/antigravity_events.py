@@ -23,8 +23,10 @@ def parse_antigravity_json(raw: str) -> str:
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
-            # Try common content keys
-            for key in ("content", "result", "text", "message"):
+            # "response" is the key used by `agy --output-format json`'s
+            # print-mode envelope (confirmed via live run); the rest are
+            # kept as fallbacks for other JSON shapes agy may emit.
+            for key in ("response", "content", "result", "text", "message"):
                 val = parsed.get(key)
                 if isinstance(val, str) and val:
                     return val

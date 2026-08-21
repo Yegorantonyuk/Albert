@@ -8,6 +8,7 @@ from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_discovery import CodexModelInfo
 from ductor_bot.cli.param_resolver import (
     TaskOverrides,
+    _validate_antigravity_model,
     resolve_cli_config,
 )
 from ductor_bot.config import AgentConfig, reset_gemini_models, set_gemini_models
@@ -222,3 +223,45 @@ def test_resolve_gemini_fallback_prefix_when_no_discovery(
 
     assert result.provider == "gemini"
     assert result.model == "gemini-foo"
+
+
+def test_resolve_antigravity_default_model(
+    base_config: AgentConfig, codex_cache: CodexModelCache
+) -> None:
+    overrides = TaskOverrides(provider="antigravity", model="antigravity-default")
+
+    result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
+
+    assert result.provider == "antigravity"
+    assert result.model == "antigravity-default"
+    assert result.reasoning_effort == ""  # antigravity drops effort, doesn't carry it
+
+
+def test_resolve_antigravity_custom_slug_allowed(
+    base_config: AgentConfig, codex_cache: CodexModelCache
+) -> None:
+    """agy accepts arbitrary model slugs; only emptiness is rejected."""
+    overrides = TaskOverrides(provider="antigravity", model="some-custom-slug")
+
+    result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
+
+    assert result.provider == "antigravity"
+    assert result.model == "some-custom-slug"
+
+
+def test_validate_antigravity_model_rejects_empty() -> None:
+    with pytest.raises(DuctorError, match="Invalid Antigravity model"):
+        _validate_antigravity_model("")
+
+
+def test_validate_antigravity_model_rejects_blank() -> None:
+    with pytest.raises(DuctorError, match="Invalid Antigravity model"):
+        _validate_antigravity_model("   ")
+
+
+def test_validate_antigravity_model_accepts_known_default() -> None:
+    _validate_antigravity_model("antigravity-default")  # must not raise
+
+
+def test_validate_antigravity_model_accepts_arbitrary_slug() -> None:
+    _validate_antigravity_model("antigravity-custom-slug")  # must not raise

@@ -366,3 +366,17 @@ class TestResolveToBuildEffortFlow:
             task_overrides=TaskOverrides(provider="gemini", model="gemini-2.5-pro"),
         )
         assert cfg.reasoning_effort == ""
+
+    def test_antigravity_drops_effort(self) -> None:
+        from ductor_bot.cli.param_resolver import TaskOverrides, resolve_cli_config
+
+        cfg = resolve_cli_config(
+            self._base(),
+            self._codex_cache(),
+            task_overrides=TaskOverrides(provider="antigravity", model="antigravity-default"),
+        )
+        assert cfg.reasoning_effort == ""
+        with patch("ductor_bot.cron.execution.which", return_value="/usr/bin/agy"):
+            result = build_cmd(cfg, "p")
+        assert result is not None
+        assert "--effort" not in result.cmd
