@@ -206,7 +206,16 @@ def _is_sigkill(response: AgentResponse) -> bool:
     return response.is_error and response.returncode == -getattr(signal, "SIGKILL", 9)
 
 
-_INVALID_SESSION_MARKERS = ("invalid session", "session not found")
+_INVALID_SESSION_MARKERS = (
+    "invalid session",
+    "session not found",
+    # #81: Claude CLI after a version bump / cache clear emits this phrasing
+    # for resumed sessions whose cached session_id has expired. Keeping all
+    # known phrasings here lets foreground + inter-agent paths share detection.
+    "no conversation found",
+    "no rollout found",
+    "thread/resume failed",
+)
 
 
 def _is_invalid_session(response: AgentResponse) -> bool:

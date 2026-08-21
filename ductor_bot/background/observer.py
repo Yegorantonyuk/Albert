@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.background.models import BackgroundResult, BackgroundSubmit, BackgroundTask
 from ductor_bot.i18n import t
-from ductor_bot.infra.task_runner import TaskRunOptions, run_oneshot_task
+from ductor_bot.infra.task_runner import run_oneshot_task
 from ductor_bot.workspace.loader import build_appended_files_block
 
 if TYPE_CHECKING:

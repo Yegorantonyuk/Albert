@@ -264,13 +264,8 @@ async def handle_interagent_message(
             chat_id, ns.name, response.session_id, status="idle"
         )
     else:
-        if response and response.session_id:
-            orch._named_sessions.update_after_response(
-                chat_id, ns.name, response.session_id, status="idle"
-            )
-        else:
-            ns.status = "idle"
-        return (response.result if response else ""), ns.name, provider_switch_notice
+        ns.status = "idle"
+    return (response.result if response else ""), ns.name, provider_switch_notice
 
 
 async def handle_async_interagent_result(
