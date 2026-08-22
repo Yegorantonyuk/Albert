@@ -9,36 +9,39 @@ from ductor_bot.cli.codex_discovery import CodexModelInfo, discover_codex_models
 from ductor_bot.cli.model_cache import BaseModelCache
 
 # Hardcoded fallback when discovery and disk cache both fail.
+# Slugs must match what a ChatGPT-account Codex CLI actually accepts --
+# anything else dies with "model is not supported when using Codex with a
+# ChatGPT account". Source of truth: ~/.codex/models_cache.json.
 _FALLBACK_CODEX_MODELS: tuple[CodexModelInfo, ...] = (
     CodexModelInfo(
-        id="gpt-5.3-codex",
-        display_name="gpt-5.3-codex",
-        description="Latest frontier agentic coding model.",
-        supported_efforts=("low", "medium", "high", "xhigh"),
+        id="gpt-5.6-terra",
+        display_name="GPT-5.6-Terra",
+        description="Balanced agentic coding model for everyday work.",
+        supported_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
         default_effort="medium",
         is_default=True,
     ),
     CodexModelInfo(
-        id="gpt-5.4",
-        display_name="gpt-5.4",
-        description="Latest frontier agentic coding model.",
+        id="gpt-5.6-luna",
+        display_name="GPT-5.6-Luna",
+        description="Faster model for lighter agentic work.",
+        supported_efforts=("low", "medium", "high", "xhigh", "max"),
+        default_effort="medium",
+        is_default=False,
+    ),
+    CodexModelInfo(
+        id="gpt-5.5",
+        display_name="GPT-5.5",
+        description="Previous-generation frontier agentic coding model.",
         supported_efforts=("low", "medium", "high", "xhigh"),
         default_effort="medium",
         is_default=False,
     ),
     CodexModelInfo(
-        id="gpt-5.2-codex",
-        display_name="gpt-5.2-codex",
-        description="Frontier agentic coding model.",
+        id="gpt-5.4-mini",
+        display_name="GPT-5.4-mini",
+        description="Cheaper and faster, but less capable.",
         supported_efforts=("low", "medium", "high", "xhigh"),
-        default_effort="medium",
-        is_default=False,
-    ),
-    CodexModelInfo(
-        id="gpt-5.1-codex-mini",
-        display_name="gpt-5.1-codex-mini",
-        description="Optimized for codex. Cheaper, faster, but less capable.",
-        supported_efforts=("medium", "high"),
         default_effort="medium",
         is_default=False,
     ),

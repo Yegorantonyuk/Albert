@@ -170,7 +170,7 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default=None,
-        help="Specific model name (e.g. gpt-5.3-codex, opus, gemini-2.5-pro)",
+        help="Specific model name (e.g. gpt-5.6-terra, opus, gemini-2.5-pro)",
     )
     parser.add_argument(
         "--description",

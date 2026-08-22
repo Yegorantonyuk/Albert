@@ -57,7 +57,7 @@ OPTIONAL:
 
 EXECUTION OVERRIDES (optional, override global config for this specific job):
   --provider          CLI provider: 'claude', 'codex', or 'gemini' (defaults to global config)
-  --model             Model name (e.g. 'opus', 'sonnet', 'gpt-5.2-codex')
+  --model             Model name (e.g. 'opus', 'sonnet', 'gpt-5.6-terra')
   --reasoning-effort  Thinking level for Codex: 'low', 'medium', 'high', 'xhigh'
   --cli-parameters    Additional CLI flags as JSON array (e.g. '["--chrome"]' for Claude only)
 
@@ -120,7 +120,7 @@ Codex job with high reasoning:
       --description "Analyze data with extended thinking" \\
       --schedule "0 9 * * *" \\
       --provider codex \\
-      --model gpt-5.2-codex \\
+      --model gpt-5.6-terra \\
       --reasoning-effort high
 
 Claude job with browser automation:
@@ -221,7 +221,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        help="Model name for this job (e.g. 'opus', 'sonnet', 'gpt-5.2-codex'). "
+        help="Model name for this job (e.g. 'opus', 'sonnet', 'gpt-5.6-terra'). "
         "If omitted, uses global config.",
     )
     parser.add_argument(

@@ -7,18 +7,18 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
 **When the user requests a new cron job, you MUST ask:**
 
 1. **Which model?**
-   - `gpt-5.2-codex` - Frontier agentic coding model (recommended)
-   - `gpt-5.3-codex` - Latest frontier agentic coding model
-   - `gpt-5.1-codex-max` - Optimized for deep and fast reasoning
-   - `gpt-5.2` - Latest frontier model
-   - `gpt-5.1-codex-mini` - Cheaper, faster (limited reasoning)
+   - `gpt-5.6-terra` - Balanced agentic coding model (recommended, default)
+   - `gpt-5.6-luna` - Faster, lighter agentic work
+   - `gpt-5.5` - Previous-generation frontier model
+   - `gpt-5.4-mini` - Cheaper and faster, less capable
+   - Authoritative list: `config/codex_models.json` (refreshed hourly from the Codex CLI)
 
 2. **Which thinking level?**
    - `low` - Fast, surface-level reasoning
    - `medium` - Balanced (default)
    - `high` - Extended thinking
    - `xhigh` - Maximum reasoning depth
-   - Note: `gpt-5.1-codex-mini` only supports `medium` and `high`
+   - Note: `gpt-5.6-terra` additionally supports `max` and `ultra`; `gpt-5.6-luna` additionally supports `max`
 
 3. **Should this job respect quiet hours?**
    - Ask: "Should this job skip execution during specific hours (e.g., at night)?"
@@ -66,7 +66,7 @@ python3 tools/cron_tools/cron_add.py \
   --title "Job Title" \
   --description "What this job does" \
   --schedule "0 9 * * *" \
-  --model gpt-5.2-codex \
+  --model gpt-5.6-terra \
   --reasoning-effort high
 ```
 
@@ -86,7 +86,7 @@ python3 tools/cron_tools/cron_list.py
 ```bash
 python3 tools/cron_tools/cron_edit.py "exact-job-id" --schedule "30 8 * * *"
 python3 tools/cron_tools/cron_edit.py "exact-job-id" --timezone "Europe/Berlin"
-python3 tools/cron_tools/cron_edit.py "exact-job-id" --model gpt-5.3-codex
+python3 tools/cron_tools/cron_edit.py "exact-job-id" --model gpt-5.6-terra
 python3 tools/cron_tools/cron_edit.py "exact-job-id" --reasoning-effort xhigh
 python3 tools/cron_tools/cron_edit.py "exact-job-id" --enable
 python3 tools/cron_tools/cron_edit.py "exact-job-id" --disable

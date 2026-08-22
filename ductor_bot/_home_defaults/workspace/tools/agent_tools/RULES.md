@@ -46,7 +46,7 @@ When creating a sub-agent:
 2. Choose the transport: **Telegram** or **Matrix**
 3. Use **specific model names**, not provider names:
    - Claude: `opus`, `sonnet`, `haiku`
-   - Codex: `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex-mini` (check `config/codex_models.json`)
+   - Codex: `gpt-5.6-terra`, `gpt-5.6-terra`, `gpt-5.4-mini` (check `config/codex_models.json`)
    - Gemini: `gemini-2.5-pro`, `gemini-2.5-flash` (check `config/gemini_models.json`)
 4. Provider is `claude`, `openai`, or `gemini`
 5. The workspace is created automatically under `agents/<name>/`

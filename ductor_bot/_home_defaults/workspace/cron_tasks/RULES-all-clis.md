@@ -12,13 +12,13 @@ For cron tool commands (add/edit/remove/list), see `tools/cron_tools/CLAUDE.md`.
 
 2. **Which model?** (`--model <name>`)
    - Claude models: `haiku`, `sonnet`, `opus`
-   - Codex models: `gpt-5.2-codex`, `gpt-5.3-codex`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.1-codex-mini`
+   - Codex models: `gpt-5.6-terra`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4-mini`
    - Gemini models: `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-3-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
    - Default if user doesn't specify: Use global config model
 
 3. **If Codex or Claude provider: Which thinking level?** (`--reasoning-effort <level>`)
    - Options: `low`, `medium`, `high`, `xhigh`
-   - Note: `gpt-5.1-codex-mini` only supports `medium` and `high`
+   - Note: `gpt-5.6-terra` additionally supports `max` and `ultra`; `gpt-5.6-luna` additionally supports `max`
    - Default if user doesn't specify: `medium` (model default)
 
 **YOU MUST present these options to the user and wait for their answers BEFORE calling cron_add.py!**
@@ -40,7 +40,7 @@ You: "I'll create a cron job to check weather every 3 minutes. Let me configure 
 
 2. **Model**: Which model?
    - If Claude: `haiku` (fast), `sonnet` (balanced), `opus` (most capable)
-   - If Codex: `gpt-5.2-codex` (recommended), `gpt-5.3-codex`, `gpt-5.1-codex-max`, etc.
+   - If Codex: `gpt-5.6-terra` (recommended), `gpt-5.6-terra`, `gpt-5.6-luna`, etc.
    - If Gemini: `gemini-2.5-pro` (recommended), `gemini-2.5-flash`, `gemini-2.5-flash-lite`, etc.
 
 3. **Thinking level** (Codex and Claude): How deeply should it reason?
@@ -87,11 +87,11 @@ Each cron task can override global config settings in `cron_jobs.json`:
 - `model`: Model name (optional, defaults to global config)
   - Claude models: `"haiku"`, `"sonnet"`, `"opus"`
   - Codex models:
-    - `"gpt-5.2-codex"` - Frontier agentic coding model
-    - `"gpt-5.3-codex"` - Latest frontier agentic coding model
-    - `"gpt-5.1-codex-max"` - Codex-optimized for deep and fast reasoning
-    - `"gpt-5.2"` - Latest frontier model
-    - `"gpt-5.1-codex-mini"` - Cheaper, faster (limited reasoning)
+    - `"gpt-5.6-terra"` - Frontier agentic coding model
+    - `"gpt-5.6-terra"` - Latest frontier agentic coding model
+    - `"gpt-5.6-luna"` - Codex-optimized for deep and fast reasoning
+    - `"gpt-5.5"` - Latest frontier model
+    - `"gpt-5.4-mini"` - Cheaper, faster (limited reasoning)
   - Gemini models:
     - `"gemini-2.5-pro"` - Balanced, most capable
     - `"gemini-2.5-flash"` - Fast and cost-effective
@@ -130,7 +130,7 @@ Codex task:
   "task_folder": "analyzer",
   "agent_instruction": "Analyze daily data with extended thinking",
   "provider": "codex",
-  "model": "gpt-5.2-codex",
+  "model": "gpt-5.6-terra",
   "reasoning_effort": "high"
 }
 ```

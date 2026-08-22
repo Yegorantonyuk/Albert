@@ -19,11 +19,11 @@ Edit only when the user asks for behavior changes.
 - `model`: default model id
   - Claude models: `haiku`, `sonnet`, `opus`
   - Codex models:
-    - `gpt-5.2-codex` - Frontier agentic coding model
-    - `gpt-5.3-codex` - Latest frontier agentic coding model
-    - `gpt-5.1-codex-max` - Codex-optimized for deep and fast reasoning
-    - `gpt-5.2` - Latest frontier model
-    - `gpt-5.1-codex-mini` - Cheaper, faster (limited reasoning)
+    - `gpt-5.6-terra` - Balanced agentic coding model (recommended, default)
+    - `gpt-5.6-luna` - Faster, lighter agentic work
+    - `gpt-5.5` - Previous-generation frontier model
+    - `gpt-5.4-mini` - Cheaper and faster, less capable
+    - Authoritative list: `config/codex_models.json` (refreshed hourly from the Codex CLI)
   - Gemini models:
     - `gemini-2.5-pro` - Balanced, most capable
     - `gemini-2.5-flash` - Fast and cost-effective
@@ -37,7 +37,7 @@ Edit only when the user asks for behavior changes.
       are also valid `--model` values and are listed in the `/model` selector,
       refreshed hourly into `config/antigravity_models.json`
 - `reasoning_effort`: reasoning depth for Codex and Claude
-  - Codex: `low`, `medium`, `high`, `xhigh` (`gpt-5.1-codex-mini` only: `medium`, `high`)
+  - Codex: `low`, `medium`, `high`, `xhigh` (`gpt-5.6-terra` also `max`, `ultra`; `gpt-5.6-luna` also `max`)
   - Claude: `low`, `medium`, `high`, `xhigh`, `max`
   - Change it for the active provider with the `/effort` command
 - `permission_mode`: CLI permission behavior

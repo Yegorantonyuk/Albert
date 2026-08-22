@@ -13,12 +13,12 @@ Scripts for managing incoming HTTP webhook endpoints.
 
 2. **Which model?**
    - **If Claude:** `haiku`, `sonnet` (recommended), `opus`
-   - **If Codex:** `gpt-5.2-codex` (recommended), `gpt-5.3-codex`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.1-codex-mini`
+   - **If Codex:** `gpt-5.6-terra` (recommended), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4-mini`
    - **If Gemini:** `gemini-2.5-pro` (recommended), `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-3-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
 
 3. **If Codex or Claude: Which thinking level?**
    - `low`, `medium` (default), `high`, `xhigh`; Claude also supports `max`
-   - Note: `gpt-5.1-codex-mini` only supports `medium` and `high`
+   - Note: `gpt-5.6-terra` additionally supports `max` and `ultra`; `gpt-5.6-luna` additionally supports `max`
 
 4. **Should this webhook respect quiet hours?**
    - Ask: "Should this webhook skip execution during specific hours (e.g., at night)?"
@@ -130,7 +130,7 @@ python3 tools/webhook_tools/webhook_add.py \
   --mode "cron_task" --task-folder "github-review" \
   --prompt-template "Review PR #{{number}}: {{title}}" \
   --provider codex \
-  --model gpt-5.2-codex \
+  --model gpt-5.6-terra \
   --reasoning-effort high
 
 # cron_task mode - Gemini example
@@ -250,11 +250,11 @@ Webhooks in `cron_task` mode can override global config settings in `webhooks.js
 - `model`: Model name (optional, defaults to global config)
   - Claude models: `"haiku"`, `"sonnet"`, `"opus"`
   - Codex models:
-    - `"gpt-5.2-codex"` - Frontier agentic coding model
-    - `"gpt-5.3-codex"` - Latest frontier agentic coding model
-    - `"gpt-5.1-codex-max"` - Codex-optimized for deep and fast reasoning
-    - `"gpt-5.2"` - Latest frontier model
-    - `"gpt-5.1-codex-mini"` - Cheaper, faster (limited reasoning)
+    - `"gpt-5.6-terra"` - Frontier agentic coding model
+    - `"gpt-5.6-terra"` - Latest frontier agentic coding model
+    - `"gpt-5.6-luna"` - Codex-optimized for deep and fast reasoning
+    - `"gpt-5.5"` - Latest frontier model
+    - `"gpt-5.4-mini"` - Cheaper, faster (limited reasoning)
   - Gemini models:
     - `"gemini-2.5-pro"` - Balanced, most capable
     - `"gemini-2.5-flash"` - Fast and cost-effective
@@ -264,7 +264,7 @@ Webhooks in `cron_task` mode can override global config settings in `webhooks.js
     - `"gemini-3.1-pro-preview"` - Latest preview
 - `reasoning_effort`: Thinking level (Codex and Claude, optional, defaults to `"medium"`)
   - Most models: `"low"`, `"medium"`, `"high"`, `"xhigh"`
-  - `gpt-5.1-codex-mini`: `"medium"`, `"high"` only
+  - Note: `gpt-5.6-terra` additionally supports `max` and `ultra`; `gpt-5.6-luna` additionally supports `max`
 - `cli_parameters`: List of additional CLI flags (optional, advanced users only)
 
 **Fallback behavior:**
@@ -294,7 +294,7 @@ Codex webhook:
   "task_folder": "data-analysis",
   "prompt_template": "Analyze data: {{summary}}",
   "provider": "codex",
-  "model": "gpt-5.2-codex",
+  "model": "gpt-5.6-terra",
   "reasoning_effort": "high"
 }
 ```

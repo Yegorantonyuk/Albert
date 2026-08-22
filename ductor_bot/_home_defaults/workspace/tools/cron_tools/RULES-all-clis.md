@@ -17,11 +17,11 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
      - `sonnet` - Balanced performance (recommended)
      - `opus` - Most capable, highest quality
    - **If Codex:**
-     - `gpt-5.2-codex` - Frontier agentic coding model (recommended)
-     - `gpt-5.3-codex` - Latest frontier agentic coding model
-     - `gpt-5.1-codex-max` - Optimized for deep and fast reasoning
-     - `gpt-5.2` - Latest frontier model
-     - `gpt-5.1-codex-mini` - Cheaper, faster (limited reasoning)
+     - `gpt-5.6-terra` - Balanced agentic coding model (recommended, default)
+     - `gpt-5.6-luna` - Faster, lighter agentic work
+     - `gpt-5.5` - Previous-generation frontier model
+     - `gpt-5.4-mini` - Cheaper and faster, less capable
+     - Authoritative list: `config/codex_models.json` (refreshed hourly from the Codex CLI)
    - **If Gemini:**
      - `gemini-2.5-pro` - Balanced, most capable (recommended)
      - `gemini-2.5-flash` - Fast and cost-effective
@@ -94,7 +94,7 @@ python3 tools/cron_tools/cron_add.py \
   --description "What this job does" \
   --schedule "0 9 * * *" \
   --provider codex \
-  --model gpt-5.2-codex \
+  --model gpt-5.6-terra \
   --reasoning-effort high
 
 # Gemini example:
