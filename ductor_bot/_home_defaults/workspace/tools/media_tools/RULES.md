@@ -27,7 +27,10 @@ python3 tools/media_tools/process_video.py --file /absolute/path/to/video.mp4
 - always available: `file_info.py`, `list_files.py`
 - PDF parsing: `pypdf`
 - YAML listing: `pyyaml`
-- audio transcription: OpenAI API key or local Whisper variants
+- audio transcription: OpenAI API key, local Whisper variants, or an external hook
+  (`transcription.audio_command` in config.json). A ready Groq wrapper ships as
+  `tools/media_tools/transcribe_groq.sh` — set `GROQ_API_KEY` in the ductor home
+  `.env`, point `transcription.audio_command` at the script, no restart needed.
 - video processing: `ffmpeg`
 
 ## Response UX
