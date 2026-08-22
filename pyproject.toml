@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "albert"
-version = "0.15.0"
+version = "0.20.1+albert.1"
 description = "AI assistant with multi-agent orchestration, Telegram/Discord support, sessions, cron jobs, webhooks."
 readme = "README.md"
 requires-python = ">=3.11"

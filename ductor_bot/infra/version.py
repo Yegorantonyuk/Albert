@@ -28,6 +28,9 @@ def get_current_version() -> str:
 def _parse_version(v: str) -> tuple[int, ...]:
     """Parse dotted version string into a comparable tuple."""
     parts: list[int] = []
+    # Strip the PEP 440 local segment ("0.20.1+albert.1") so a fork suffix does
+    # not truncate the comparison at the minor component.
+    v = v.split("+", 1)[0]
     for segment in v.split("."):
         try:
             parts.append(int(segment))
