@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 _PHOTO_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"})
 _VIDEO_SUFFIXES = frozenset({".mp4"})
 _AUDIO_SUFFIXES = frozenset({".mp3", ".m4a"})
+# Голосовые сообщения: Telegram рисует их волной и играет в один тап,
+# в отличие от send_audio, который отдаёт файл как музыкальный трек.
+_VOICE_SUFFIXES = frozenset({".ogg", ".oga", ".opus"})
 
 
 def _select_telegram_upload_mode(path: Path, mime: str) -> str:
@@ -55,6 +58,8 @@ def _select_telegram_upload_mode(path: Path, mime: str) -> str:
         return "photo"
     if mime.startswith("video/") and suffix in _VIDEO_SUFFIXES:
         return "video"
+    if mime.startswith("audio/") and suffix in _VOICE_SUFFIXES:
+        return "voice"
     if mime.startswith("audio/") and suffix in _AUDIO_SUFFIXES:
         return "audio"
     return "document"
@@ -89,6 +94,8 @@ async def _send_by_mode(
             await bot.send_video(chat_id=chat_id, video=input_file, message_thread_id=thread_id)
         elif upload_mode == "audio":
             await bot.send_audio(chat_id=chat_id, audio=input_file, message_thread_id=thread_id)
+        elif upload_mode == "voice":
+            await bot.send_voice(chat_id=chat_id, voice=input_file, message_thread_id=thread_id)
         else:
             await _send_document(bot, chat_id, path, thread_id)
             return

@@ -241,6 +241,36 @@ class TestSendFile:
 
         bot.send_audio.assert_called_once()
 
+    async def test_ogg_sent_as_voice_note(self, tmp_path: Path) -> None:
+        from ductor_bot.messenger.telegram.sender import send_file
+
+        voice = tmp_path / "reply.ogg"
+        voice.write_bytes(b"not-relevant")
+
+        bot = MagicMock()
+        bot.send_voice = AsyncMock()
+        bot.send_audio = AsyncMock()
+        with patch("ductor_bot.messenger.telegram.sender.guess_mime", return_value="audio/ogg"):
+            await send_file(bot, chat_id=1, path=voice)
+
+        bot.send_voice.assert_called_once()
+        bot.send_audio.assert_not_called()
+
+    async def test_voice_rejected_retries_as_document(self, tmp_path: Path) -> None:
+        from ductor_bot.messenger.telegram.sender import send_file
+
+        voice = tmp_path / "reply.ogg"
+        voice.write_bytes(b"not-relevant")
+
+        bot = MagicMock()
+        bot.send_voice = AsyncMock(side_effect=TelegramBadRequest(MagicMock(), "bad voice"))
+        bot.send_document = AsyncMock()
+        with patch("ductor_bot.messenger.telegram.sender.guess_mime", return_value="audio/ogg"):
+            await send_file(bot, chat_id=1, path=voice)
+
+        bot.send_voice.assert_called_once()
+        bot.send_document.assert_called_once()
+
     async def test_unsupported_audio_sent_as_document(self, tmp_path: Path) -> None:
         from ductor_bot.messenger.telegram.sender import send_file
 
