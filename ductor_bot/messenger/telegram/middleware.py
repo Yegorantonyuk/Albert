@@ -20,7 +20,7 @@ from aiogram.types import (
     TelegramObject,
 )
 
-from ductor_bot.bus.lock_pool import LockPool
+from ductor_bot.bus.lock_pool import LockPool, LockPoolInput
 from ductor_bot.log_context import set_log_context
 from ductor_bot.messenger.telegram.abort import (
     is_abort_all_message,
@@ -208,12 +208,12 @@ class SequentialMiddleware(BaseMiddleware):
         """Register a callback for read-only commands dispatched *before* the lock."""
         self._quick_command_handler = handler
 
-    def get_lock(self, lock_key: tuple[int, int | None] | int) -> asyncio.Lock:
+    def get_lock(self, lock_key: LockPoolInput) -> asyncio.Lock:
         """Return the per-session lock, creating it if needed.
 
-        Accepts either a ``(chat_id, topic_id)`` tuple (from
-        ``SessionKey.lock_key``) or a plain ``chat_id`` integer for
-        backward compatibility.
+        Accepts canonical ``(transport, chat_id, topic_id)`` keys (including
+        ``SessionKey.lock_key``), legacy ``(chat_id, topic_id)`` tuples, or
+        plain ``chat_id`` integers. Legacy forms are Telegram-scoped.
 
         Used by webhook wake dispatch to queue behind active conversations.
         """

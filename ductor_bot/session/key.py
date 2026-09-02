@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeAlias
+
+
+LockKey: TypeAlias = tuple[str, int, int | None]
+"""Canonical transport-qualified identity for a per-session lock."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +34,9 @@ class SessionKey:
         return f"{self.transport}:{self.chat_id}:{self.topic_id}"
 
     @property
-    def lock_key(self) -> tuple[int, int | None]:
+    def lock_key(self) -> LockKey:
         """Hashable key for per-session lock dictionaries."""
-        return (self.chat_id, self.topic_id)
+        return (self.transport, self.chat_id, self.topic_id)
 
     @classmethod
     def for_transport(cls, transport: str, chat_id: int, topic_id: int | None = None) -> SessionKey:

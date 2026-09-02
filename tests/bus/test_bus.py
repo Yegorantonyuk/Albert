@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
@@ -129,6 +130,34 @@ async def test_lock_none_does_not_lock() -> None:
     await bus.submit(env)
 
     assert locked_inside is False
+
+
+async def test_required_message_bus_locks_transport_and_topics_independently() -> None:
+    pool = LockPool()
+    bus = MessageBus(lock_pool=pool)
+    flat_tg = _env(chat_id=42, transport="tg", lock_mode=LockMode.REQUIRED)
+    web = _env(chat_id=42, transport="web", lock_mode=LockMode.REQUIRED)
+    tg_topic = _env(chat_id=42, topic_id=7, transport="tg", lock_mode=LockMode.REQUIRED)
+    flat_entered = asyncio.Event()
+    release_flat = asyncio.Event()
+
+    async def hold_flat(envelope: Envelope) -> None:
+        if envelope is flat_tg:
+            flat_entered.set()
+            await release_flat.wait()
+
+    bus.set_pre_deliver_hook(hold_flat)
+    flat_task = asyncio.create_task(bus.submit(flat_tg))
+    try:
+        await asyncio.wait_for(flat_entered.wait(), timeout=0.2)
+        await asyncio.wait_for(bus.submit(web), timeout=0.2)
+        await asyncio.wait_for(bus.submit(tg_topic), timeout=0.2)
+        assert pool.get(flat_tg.lock_key) is not pool.get(web.lock_key)
+        assert pool.get(flat_tg.lock_key) is not pool.get(tg_topic.lock_key)
+        assert pool.get(web.lock_key) is not pool.get(tg_topic.lock_key)
+    finally:
+        release_flat.set()
+        await flat_task
 
 
 # -- Injection --

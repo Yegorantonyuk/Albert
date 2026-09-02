@@ -51,14 +51,15 @@ def test_envelope_defaults() -> None:
     assert env.session_id == ""
 
 
-def test_envelope_lock_key_without_topic() -> None:
+def test_envelope_lock_key_uses_existing_transport() -> None:
     env = Envelope(origin=Origin.HEARTBEAT, chat_id=42)
-    assert env.lock_key == (42, None)
-
-
-def test_envelope_lock_key_with_topic() -> None:
-    env = Envelope(origin=Origin.INTERAGENT, chat_id=42, topic_id=7)
-    assert env.lock_key == (42, 7)
+    assert env.lock_key == ("tg", 42, None)
+    assert Envelope(origin=Origin.HEARTBEAT, chat_id=42, transport="web").lock_key == (
+        "web",
+        42,
+        None,
+    )
+    assert Envelope(origin=Origin.INTERAGENT, chat_id=42, topic_id=7).lock_key == ("tg", 42, 7)
 
 
 def test_envelope_created_at_is_set() -> None:

@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ductor_bot.session.key import LockKey
+
 
 class Origin(enum.Enum):
     """Where the message result came from."""
@@ -92,6 +94,6 @@ class Envelope:
     session_id: str = ""
 
     @property
-    def lock_key(self) -> tuple[int, int | None]:
+    def lock_key(self) -> LockKey:
         """Key for per-session lock acquisition."""
-        return (self.chat_id, self.topic_id)
+        return (self.transport, self.chat_id, self.topic_id)

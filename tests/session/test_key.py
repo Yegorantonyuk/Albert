@@ -93,18 +93,18 @@ class TestParse:
 
 
 class TestLockKey:
-    def test_excludes_transport(self) -> None:
+    def test_includes_transport(self) -> None:
         key = SessionKey(transport="tg", chat_id=123, topic_id=45)
-        assert key.lock_key == (123, 45)
+        assert key.lock_key == ("tg", 123, 45)
 
     def test_flat_lock_key(self) -> None:
         key = SessionKey(transport="tg", chat_id=123)
-        assert key.lock_key == (123, None)
+        assert key.lock_key == ("tg", 123, None)
 
-    def test_same_lock_key_different_transport(self) -> None:
+    def test_same_numeric_key_different_transport(self) -> None:
         tg = SessionKey(transport="tg", chat_id=123)
         mx = SessionKey(transport="mx", chat_id=123)
-        assert tg.lock_key == mx.lock_key
+        assert tg.lock_key != mx.lock_key
 
     def test_different_lock_key_different_chat(self) -> None:
         a = SessionKey(transport="tg", chat_id=1)
