@@ -7,6 +7,7 @@ crypto primitives -- all encryption/decryption is real.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from pathlib import Path
@@ -25,6 +26,7 @@ from nacl.exceptions import CryptoError
 from ductor_bot.api.crypto import E2ESession
 from ductor_bot.api.server import ApiServer
 from ductor_bot.config import ApiConfig
+from ductor_bot.session.key import SessionKey
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -73,12 +75,15 @@ async def _do_handshake(
     ws: Any,
     token: str = _DEFAULT_TOKEN,
     chat_id: int | None = None,
+    channel_id: int | None = None,
 ) -> tuple[E2ESession, dict[str, Any]]:
     """Perform E2E handshake.  Returns (client_e2e, auth_ok_data)."""
     client = E2ESession()
     auth_msg: dict[str, Any] = {"type": "auth", "token": token, "e2e_pk": client.local_pk_b64}
     if chat_id is not None:
         auth_msg["chat_id"] = chat_id
+    if channel_id is not None:
+        auth_msg["channel_id"] = channel_id
     await ws.send_json(auth_msg)
     resp = await ws.receive_json()
     assert resp["type"] == "auth_ok"
@@ -177,6 +182,27 @@ class TestE2EHandshake:
         assert resp["chat_id"] == 999
         await ws.close()
 
+    async def test_authenticated_session_key_uses_api_transport(
+        self,
+        api_ws: tuple[TestClient, ApiServer],
+    ) -> None:
+        client, server = api_ws
+        key_seen: asyncio.Future[SessionKey] = asyncio.get_running_loop().create_future()
+
+        async def capture_session_key(_channel: object, key: SessionKey) -> None:
+            key_seen.set_result(key)
+
+        server._session_loop = capture_session_key  # type: ignore[method-assign]
+        ws = await client.ws_connect("/ws")
+        _, resp = await _do_handshake(ws, chat_id=999, channel_id=7)
+        key = await asyncio.wait_for(key_seen, timeout=1)
+
+        assert resp["chat_id"] == 999
+        assert resp["channel_id"] == 7
+        assert key.storage_key == "api:999:7"
+        assert key.lock_key == ("api", 999, 7)
+        await ws.close()
+
     async def test_missing_e2e_pk_rejected(self, api_ws: tuple[TestClient, ApiServer]) -> None:
         client, _ = api_ws
         ws = await client.ws_connect("/ws")
@@ -207,8 +233,6 @@ class TestE2EHandshake:
 
     async def test_auth_timeout(self, tmp_path: Path) -> None:
         """If client sends nothing within timeout, server closes with auth_timeout."""
-        import asyncio
-
         config = ApiConfig(
             enabled=True,
             host="127.0.0.1",

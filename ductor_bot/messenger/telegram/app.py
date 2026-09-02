@@ -1302,7 +1302,9 @@ class TelegramBot:
             if self._config.streaming.enabled:
                 result_text = await self._handle_streaming(message, key, text, thread_id=thread_id)
             else:
-                result_text = await self._handle_non_streaming(message, key, text, thread_id=thread_id)
+                result_text = await self._handle_non_streaming(
+                    message, key, text, thread_id=thread_id
+                )
             if self._config.scene.progress_reactions:
                 if _is_empty_response(result_text):
                     await self._set_reaction(message, "\U0001f631")  # 😱 — no response
@@ -1388,6 +1390,7 @@ class TelegramBot:
 
         on_tool_reaction = None
         if self._config.scene.progress_reactions:
+
             async def on_tool_reaction() -> None:
                 await self._set_reaction(message, "\u270d\ufe0f")  # ✍️
 

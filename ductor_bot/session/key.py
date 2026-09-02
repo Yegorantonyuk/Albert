@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
-
 LockKey: TypeAlias = tuple[str, int, int | None]
 """Canonical transport-qualified identity for a per-session lock."""
 

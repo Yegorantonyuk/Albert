@@ -141,7 +141,12 @@ def from_webhook_wake(chat_id: int, prompt: str) -> Envelope:
 # -- Inter-agent ---------------------------------------------------------------
 
 
-def from_interagent_result(result: AsyncInterAgentResult, chat_id: int) -> Envelope:
+def from_interagent_result(
+    result: AsyncInterAgentResult,
+    chat_id: int,
+    *,
+    transport: str = "tg",
+) -> Envelope:
     """Convert an async inter-agent result.
 
     Uses ``result.chat_id`` / ``result.topic_id`` when available so that
@@ -166,6 +171,7 @@ def from_interagent_result(result: AsyncInterAgentResult, chat_id: int) -> Envel
             origin=Origin.INTERAGENT,
             chat_id=delivery_chat_id,
             topic_id=result.topic_id,
+            transport=transport,
             prompt_preview=result.message_preview,
             result_text=result.result_text,
             status="error",
@@ -181,6 +187,7 @@ def from_interagent_result(result: AsyncInterAgentResult, chat_id: int) -> Envel
         origin=Origin.INTERAGENT,
         chat_id=delivery_chat_id,
         topic_id=result.topic_id,
+        transport=transport,
         prompt_preview=result.message_preview,
         result_text=result.result_text,
         status="success",
@@ -196,7 +203,7 @@ def from_interagent_result(result: AsyncInterAgentResult, chat_id: int) -> Envel
 # -- Task results & questions --------------------------------------------------
 
 
-def from_task_result(result: TaskResult) -> Envelope:
+def from_task_result(result: TaskResult, *, transport: str = "tg") -> Envelope:
     """Convert a background task result.
 
     done/failed: acquire lock, inject into parent session.
@@ -208,6 +215,7 @@ def from_task_result(result: TaskResult) -> Envelope:
         origin=Origin.TASK_RESULT,
         chat_id=result.chat_id,
         topic_id=result.thread_id,
+        transport=transport,
         prompt=prompt,
         prompt_preview=result.prompt_preview,
         result_text=result.result_text,
@@ -259,19 +267,21 @@ def _build_task_injection_prompt(result: TaskResult) -> str:
     )
 
 
-def from_task_question(
+def from_task_question(  # noqa: PLR0913
     task_id: str,
     question: str,
     prompt_preview: str,
     chat_id: int,
     *,
     topic_id: int | None = None,
+    transport: str = "tg",
 ) -> Envelope:
     """Convert a task question (worker asks parent agent)."""
     return Envelope(
         origin=Origin.TASK_QUESTION,
         chat_id=chat_id,
         topic_id=topic_id,
+        transport=transport,
         prompt=question,
         prompt_preview=prompt_preview,
         delivery=DeliveryMode.UNICAST,

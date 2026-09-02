@@ -464,7 +464,7 @@ class ApiServer:
         if not isinstance(channel_id, int) or channel_id <= 0:
             channel_id = None
 
-        key = SessionKey(chat_id=chat_id, topic_id=channel_id)
+        key = SessionKey(transport="api", chat_id=chat_id, topic_id=channel_id)
 
         # Last plaintext message -- everything after this is E2E encrypted
         auth_ok_payload: dict[str, object] = {

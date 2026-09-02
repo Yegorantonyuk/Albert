@@ -315,7 +315,7 @@ class DiscordBot:
             import discord
 
             if isinstance(exc, discord.LoginFailure):
-                logger.error("Discord: invalid token — login failed: %s", exc)
+                logger.exception("Discord: invalid token — login failed")
                 return 1
             if not isinstance(exc, asyncio.CancelledError):
                 logger.exception("Discord client exited with error, requesting restart")
@@ -393,12 +393,13 @@ class DiscordBot:
         """Return True when the message passes all configured allow-lists."""
         if self._allowed_user_ids and message.author.id not in self._allowed_user_ids:
             return False
-        if self._allowed_guild_ids:
-            if message.guild is None or message.guild.id not in self._allowed_guild_ids:
-                return False
-        if self._allowed_channel_ids and message.channel.id not in self._allowed_channel_ids:
+        if self._allowed_guild_ids and (
+            message.guild is None or message.guild.id not in self._allowed_guild_ids
+        ):
             return False
-        return True
+        return not (
+            self._allowed_channel_ids and message.channel.id not in self._allowed_channel_ids
+        )
 
     # --- Command handling ---
 
@@ -597,18 +598,14 @@ class DiscordBot:
         async with lock:
             await self._cmd_orchestrator(text=text, channel=channel, key=key, message=message)
 
-    async def _dispatch_message(
-        self, key: SessionKey, text: str, message: discord.Message
-    ) -> None:
+    async def _dispatch_message(self, key: SessionKey, text: str, message: discord.Message) -> None:
         """Route a message through the streaming or non-streaming pipeline."""
         if self._config.streaming.enabled:
             await self._run_streaming(key, text, message)
         else:
             await self._run_non_streaming(key, text, message)
 
-    async def _run_streaming(
-        self, key: SessionKey, text: str, message: discord.Message
-    ) -> None:
+    async def _run_streaming(self, key: SessionKey, text: str, message: discord.Message) -> None:
         orch = self._orchestrator
         if orch is None:
             return
@@ -768,12 +765,12 @@ class DiscordBot:
             text = result.result_text or f"Inter-agent result from {result.recipient}"
             await self._notification_service.notify_all(text)
             return
-        await self._bus.submit(from_interagent_result(result, chat_id))
+        await self._bus.submit(from_interagent_result(result, chat_id, transport=_TRANSPORT_KEY))
 
     async def on_task_result(self, result: TaskResult) -> None:
         from ductor_bot.bus.adapters import from_task_result
 
-        await self._bus.submit(from_task_result(result))
+        await self._bus.submit(from_task_result(result, transport=_TRANSPORT_KEY))
 
     async def on_task_question(
         self,
@@ -787,7 +784,15 @@ class DiscordBot:
 
         if not chat_id:
             chat_id = self._default_channel_id()
-        await self._bus.submit(from_task_question(task_id, question, prompt_preview, chat_id))
+        await self._bus.submit(
+            from_task_question(
+                task_id,
+                question,
+                prompt_preview,
+                chat_id,
+                transport=_TRANSPORT_KEY,
+            )
+        )
 
     # --- Restart watcher ---
 

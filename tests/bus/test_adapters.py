@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from ductor_bot.bus.adapters import (
     from_background_result,
     from_cron_result,
@@ -169,6 +171,8 @@ def test_from_interagent_success() -> None:
     assert env.lock_mode == LockMode.REQUIRED
     assert env.needs_injection
     assert env.metadata["sender"] == "agent-a"
+    assert env.transport == "tg"
+    assert env.lock_key == ("tg", 100, None)
 
 
 def test_from_interagent_error() -> None:
@@ -225,6 +229,8 @@ def test_from_task_result_done() -> None:
     assert "task_id='t1'" in env.prompt
     assert "found it" in env.prompt
     assert "Review this result critically" in env.prompt
+    assert env.transport == "tg"
+    assert env.lock_key == ("tg", 100, None)
 
 
 def test_from_task_result_with_topic() -> None:
@@ -266,6 +272,33 @@ def test_from_task_question() -> None:
     assert env.lock_mode == LockMode.REQUIRED
     assert env.needs_injection
     assert env.metadata["task_id"] == "t1"
+    assert env.transport == "tg"
+    assert env.lock_key == ("tg", 100, None)
+
+
+@pytest.mark.parametrize("transport", ["mx", "dc"])
+def test_session_injection_adapters_preserve_explicit_transport(transport: str) -> None:
+    interagent = from_interagent_result(
+        _FakeInterAgentResult(topic_id=7),
+        chat_id=100,
+        transport=transport,
+    )
+    task_result = from_task_result(_FakeTaskResult(thread_id=7), transport=transport)
+    task_question = from_task_question(
+        "t1",
+        "what color?",
+        "what co...",
+        100,
+        topic_id=7,
+        transport=transport,
+    )
+
+    assert interagent.transport == transport
+    assert interagent.lock_key == (transport, 100, 7)
+    assert task_result.transport == transport
+    assert task_result.lock_key == (transport, 100, 7)
+    assert task_question.transport == transport
+    assert task_question.lock_key == (transport, 100, 7)
 
 
 def test_from_task_question_with_topic() -> None:
