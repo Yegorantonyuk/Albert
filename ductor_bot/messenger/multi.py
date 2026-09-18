@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CANONICAL_TRANSPORTS = {"telegram": "tg", "matrix": "mx", "discord": "dc"}
+
 
 class MultiBotAdapter:
     """Wraps multiple transport bots into a single BotProtocol facade.
@@ -53,6 +55,7 @@ class MultiBotAdapter:
             raise ValueError(msg)
 
         bots: list[BotProtocol] = []
+        self._bots_by_transport: dict[str, BotProtocol] = {}
         for transport_name in transports:
             bot = _create_single_bot(
                 transport_name,
@@ -62,6 +65,7 @@ class MultiBotAdapter:
                 lock_pool=self._lock_pool,
             )
             bots.append(bot)
+            self._bots_by_transport[_CANONICAL_TRANSPORTS[transport_name]] = bot
 
         self._primary: BotProtocol = bots[0]
         self._secondaries: list[BotProtocol] = bots[1:]
@@ -104,26 +108,47 @@ class MultiBotAdapter:
         for bot in self._all:
             bot.set_abort_all_callback(callback)
 
-    # -- BotProtocol: methods that fan out to all bots -------------------------
+    # -- BotProtocol: origin-scoped result delivery ----------------------------
+
+    def _bot_for_transport(self, transport: str) -> BotProtocol | None:
+        bot = self._bots_by_transport.get(transport)
+        if bot is None:
+            logger.error(
+                "No configured bot for origin transport %r; result not delivered",
+                transport,
+            )
+        return bot
 
     async def on_async_interagent_result(self, result: AsyncInterAgentResult) -> None:
-        for bot in self._all:
+        bot = self._bot_for_transport(result.transport)
+        if bot is not None:
             await bot.on_async_interagent_result(result)
 
     async def on_task_result(self, result: TaskResult) -> None:
-        for bot in self._all:
+        bot = self._bot_for_transport(result.transport)
+        if bot is not None:
             await bot.on_task_result(result)
 
-    async def on_task_question(
+    async def on_task_question(  # noqa: PLR0913
         self,
         task_id: str,
         question: str,
         prompt_preview: str,
         chat_id: int,
         thread_id: int | None = None,
+        *,
+        transport: str = "tg",
     ) -> None:
-        for bot in self._all:
-            await bot.on_task_question(task_id, question, prompt_preview, chat_id, thread_id)
+        bot = self._bot_for_transport(transport)
+        if bot is not None:
+            await bot.on_task_question(
+                task_id,
+                question,
+                prompt_preview,
+                chat_id,
+                thread_id,
+                transport=transport,
+            )
 
     def file_roots(self, paths: DuctorPaths) -> list[Path] | None:
         return self._primary.file_roots(paths)

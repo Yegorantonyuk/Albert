@@ -128,6 +128,7 @@ async def _prepare_normal(
         effort_override=req_effort,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        transport=key.transport,
         resume_session=None if is_new else session.session_id,
         timeout_seconds=timeout_secs,
         timeout_controller=_make_timeout_controller(orch, "normal"),
@@ -227,6 +228,10 @@ def _session_recovered_msg() -> str:
     return t("session.recovered")
 
 
+def _session_recovery_failed_msg() -> str:
+    return t("session.recovery_failed")
+
+
 def _is_sigkill(response: AgentResponse) -> bool:
     """Return True when the response indicates SIGKILL termination."""
     return response.is_error and response.returncode == -getattr(signal, "SIGKILL", 9)
@@ -290,7 +295,7 @@ class _RecoveryOutcome:
     failed_result: OrchestratorResult | None
 
 
-async def _maybe_recover_session(  # noqa: PLR0913
+async def _maybe_recover_session(  # noqa: PLR0913, PLR0917
     orch: Orchestrator,
     key: SessionKey,
     text: str,
@@ -434,7 +439,7 @@ async def _gemini_missing_config_key_warning(
     return OrchestratorResult(text=t("gemini.missing_key"))
 
 
-async def normal(
+async def normal(  # noqa: PLR0911
     orch: Orchestrator,
     key: SessionKey,
     text: str,
@@ -498,7 +503,7 @@ async def normal(
         orch._inflight_tracker.complete(key.chat_id)
 
 
-async def normal_streaming(
+async def normal_streaming(  # noqa: PLR0911
     orch: Orchestrator,
     key: SessionKey,
     text: str,
@@ -708,6 +713,7 @@ async def named_session_flow(
         effort_override=ns.reasoning_effort or None,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        transport=key.transport,
         process_label=f"ns:{session_name}",
         resume_session=ns.session_id or None,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
@@ -763,6 +769,7 @@ async def named_session_streaming(
         effort_override=ns.reasoning_effort or None,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        transport=key.transport,
         process_label=f"ns:{session_name}",
         resume_session=ns.session_id or None,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
@@ -865,6 +872,7 @@ async def heartbeat_flow(
         effort_override=session.reasoning_effort or None,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        transport=key.transport,
         resume_session=session.session_id,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
         timeout_controller=_make_timeout_controller(orch, "normal"),

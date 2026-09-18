@@ -170,16 +170,17 @@ class TestWireIntegration:
         mgr = _make_observers()
         bus = MessageBus()
         transport = AsyncMock()
-        transport.transport_name = "tg"
+        transport.transport_name = "mx"
         bus.register_transport(transport)
         mgr.wire_to_bus(bus)
 
         handler = mgr.heartbeat.set_result_handler.call_args[0][0]
-        await handler(-1001, "Group alert", 42)
+        await handler(-1001, "Group alert", 42, "mx")
 
         transport.deliver.assert_awaited_once()
         env = transport.deliver.call_args[0][0]
         assert env.origin == Origin.HEARTBEAT
+        assert env.transport == "mx"
         assert env.chat_id == -1001
         assert env.topic_id == 42
         assert env.result_text == "Group alert"

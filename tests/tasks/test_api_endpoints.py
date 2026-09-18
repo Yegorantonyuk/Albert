@@ -51,6 +51,29 @@ class TestTaskCreate:
         data = await resp.json()
         assert data["success"] is True
         assert data["task_id"] == "abc123"
+        submit = api_client.app["_test_hub"].submit.call_args.args[0]
+        assert submit.transport == "tg"
+
+    async def test_creates_task_with_origin_transport(self, api_client: TestClient) -> None:
+        resp = await api_client.post(
+            "/tasks/create",
+            json={
+                "from": "main",
+                "prompt": "build website",
+                "transport": "api",
+            },
+        )
+
+        assert resp.status == 200
+        submit = api_client.app["_test_hub"].submit.call_args.args[0]
+        assert submit.transport == "api"
+
+    async def test_rejects_unknown_transport(self, api_client: TestClient) -> None:
+        resp = await api_client.post(
+            "/tasks/create",
+            json={"from": "main", "prompt": "build website", "transport": "matrix"},
+        )
+        assert resp.status == 400
 
     async def test_missing_prompt(self, api_client: TestClient) -> None:
         resp = await api_client.post("/tasks/create", json={"from": "main"})

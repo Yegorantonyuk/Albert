@@ -18,8 +18,8 @@ Options:
                        follow-ups stay responsive; background (default)
                        and batch respect it.
 
-Environment variables DUCTOR_AGENT_NAME and DUCTOR_INTERAGENT_PORT are
-automatically set by the Ductor framework.
+Environment variables DUCTOR_AGENT_NAME, DUCTOR_INTERAGENT_PORT, and
+DUCTOR_TRANSPORT are automatically set by the Ductor framework.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def main() -> None:
 
     if not args:
         print(
-            'Usage: python3 create_task.py [--name NAME] [--provider P] '
+            "Usage: python3 create_task.py [--name NAME] [--provider P] "
             '[--model M] [--thinking L] [--priority LEVEL] "prompt"',
             file=sys.stderr,
         )
@@ -103,6 +103,8 @@ def main() -> None:
     # Propagate sender context so task results route back to the originating chat/topic
     chat_id = os.environ.get("DUCTOR_CHAT_ID", "")
     topic_id = os.environ.get("DUCTOR_TOPIC_ID", "")
+    transport = os.environ.get("DUCTOR_TRANSPORT", "tg")
+    body["transport"] = transport
     if chat_id:
         body["chat_id"] = int(chat_id)
     if topic_id:

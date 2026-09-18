@@ -765,20 +765,22 @@ class DiscordBot:
             text = result.result_text or f"Inter-agent result from {result.recipient}"
             await self._notification_service.notify_all(text)
             return
-        await self._bus.submit(from_interagent_result(result, chat_id, transport=_TRANSPORT_KEY))
+        await self._bus.submit(from_interagent_result(result, chat_id, transport=result.transport))
 
     async def on_task_result(self, result: TaskResult) -> None:
         from ductor_bot.bus.adapters import from_task_result
 
-        await self._bus.submit(from_task_result(result, transport=_TRANSPORT_KEY))
+        await self._bus.submit(from_task_result(result, transport=result.transport))
 
-    async def on_task_question(
+    async def on_task_question(  # noqa: PLR0913
         self,
         task_id: str,
         question: str,
         prompt_preview: str,
         chat_id: int,
         thread_id: int | None = None,
+        *,
+        transport: str = "tg",
     ) -> None:
         from ductor_bot.bus.adapters import from_task_question
 
@@ -790,7 +792,7 @@ class DiscordBot:
                 question,
                 prompt_preview,
                 chat_id,
-                transport=_TRANSPORT_KEY,
+                transport=transport,
             )
         )
 

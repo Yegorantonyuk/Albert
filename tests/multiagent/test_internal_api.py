@@ -118,6 +118,56 @@ class TestHandleSendAsync:
         )
         assert resp.status == 400
 
+    async def test_send_async_passes_validated_transport(
+        self, client: TestClient, bus: InterAgentBus
+    ) -> None:
+        bus.register("target", MagicMock())
+        bus.send_async = MagicMock(return_value="transport-task")  # type: ignore[method-assign]
+
+        resp = await client.post(
+            "/interagent/send_async",
+            json={
+                "from": "sender",
+                "to": "target",
+                "message": "Hello",
+                "transport": "dc",
+                "chat_id": 123,
+                "topic_id": 7,
+            },
+        )
+
+        assert resp.status == 200
+        opts = bus.send_async.call_args.kwargs["opts"]  # type: ignore[attr-defined]
+        assert opts.transport == "dc"
+        assert opts.chat_id == 123
+        assert opts.topic_id == 7
+
+    async def test_send_async_defaults_transport_to_telegram(
+        self, client: TestClient, bus: InterAgentBus
+    ) -> None:
+        bus.register("target", MagicMock())
+        bus.send_async = MagicMock(return_value="legacy-task")  # type: ignore[method-assign]
+
+        resp = await client.post(
+            "/interagent/send_async",
+            json={"from": "sender", "to": "target", "message": "Hello"},
+        )
+
+        assert resp.status == 200
+        assert bus.send_async.call_args.kwargs["opts"].transport == "tg"  # type: ignore[attr-defined]
+
+    async def test_send_async_rejects_unknown_transport(self, client: TestClient) -> None:
+        resp = await client.post(
+            "/interagent/send_async",
+            json={
+                "from": "sender",
+                "to": "target",
+                "message": "Hello",
+                "transport": "matrix",
+            },
+        )
+        assert resp.status == 400
+
 
 class TestNewSessionFlag:
     """Test new_session flag in /interagent/send and /interagent/send_async."""

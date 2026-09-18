@@ -1133,27 +1133,29 @@ class MatrixBot:
             text = result.result_text or f"Inter-agent result from {result.recipient}"
             await self._notification_service.notify_all(text)
             return
-        await self._bus.submit(from_interagent_result(result, chat_id, transport="mx"))
+        await self._bus.submit(from_interagent_result(result, chat_id, transport=result.transport))
 
     async def on_task_result(self, result: TaskResult) -> None:
         from ductor_bot.bus.adapters import from_task_result
 
-        await self._bus.submit(from_task_result(result, transport="mx"))
+        await self._bus.submit(from_task_result(result, transport=result.transport))
 
-    async def on_task_question(
+    async def on_task_question(  # noqa: PLR0913
         self,
         task_id: str,
         question: str,
         prompt_preview: str,
         chat_id: int,
         thread_id: int | None = None,
+        *,
+        transport: str = "tg",
     ) -> None:
         from ductor_bot.bus.adapters import from_task_question
 
         if not chat_id:
             chat_id = self._default_chat_id()
         await self._bus.submit(
-            from_task_question(task_id, question, prompt_preview, chat_id, transport="mx")
+            from_task_question(task_id, question, prompt_preview, chat_id, transport=transport)
         )
 
     def _default_chat_id(self) -> int:

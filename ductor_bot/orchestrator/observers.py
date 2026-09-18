@@ -206,7 +206,7 @@ class ObserverManager:
 
         if self.cron:
 
-            async def _on_cron(  # noqa: PLR0913
+            async def _on_cron(  # noqa: PLR0913, PLR0917
                 title: str,
                 result: str,
                 status: str,
@@ -229,8 +229,13 @@ class ObserverManager:
 
             self.cron.set_result_handler(_on_cron)
 
-        async def _on_heartbeat(chat_id: int, text: str, topic_id: int | None = None) -> None:
-            await bus.submit(from_heartbeat(chat_id, text, topic_id))
+        async def _on_heartbeat(
+            chat_id: int,
+            text: str,
+            topic_id: int | None = None,
+            transport: str = "tg",
+        ) -> None:
+            await bus.submit(from_heartbeat(chat_id, text, topic_id, transport=transport))
 
         self.heartbeat.set_result_handler(_on_heartbeat)
 

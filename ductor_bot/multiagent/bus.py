@@ -47,18 +47,19 @@ class AsyncSendOptions:
     """Optional metadata for :meth:`InterAgentBus.send_async`.
 
     Bundles keyword-only parameters that control session handling and
-    Telegram routing so the public API stays within the argument limit.
+    origin routing so the public API stays within the argument limit.
 
     *new_session*: end any existing inter-agent session before processing.
     *summary*: notification preview shown in the recipient's Telegram chat.
-    *chat_id* / *topic_id*: originating Telegram group/topic context so
-    that results are delivered back to the correct thread.
+    *chat_id* / *topic_id* / *transport*: originating session context so
+    that results are delivered back through the correct transport and topic.
     """
 
     new_session: bool = False
     summary: str = ""
     chat_id: int = 0
     topic_id: int | None = None
+    transport: str = "tg"
 
 
 @dataclass(slots=True)
@@ -75,6 +76,7 @@ class AsyncInterAgentTask:
     asyncio_task: asyncio.Task[None] | None = field(default=None, repr=False)
     chat_id: int = 0
     topic_id: int | None = None
+    transport: str = "tg"
 
 
 @dataclass(slots=True)
@@ -94,6 +96,7 @@ class AsyncInterAgentResult:
     original_message: str = ""
     chat_id: int = 0
     topic_id: int | None = None
+    transport: str = "tg"
 
 
 AsyncResultCallback = Callable[["AsyncInterAgentResult"], Awaitable[None]]
@@ -226,7 +229,7 @@ class InterAgentBus:
         sender agent's registered callback when the target agent finishes.
         Returns None if the recipient is not found.
 
-        Optional *opts* controls session handling and Telegram routing.
+        Optional *opts* controls session handling and origin routing.
         See :class:`AsyncSendOptions` for details.
         """
         if recipient not in self._agents:
@@ -243,6 +246,7 @@ class InterAgentBus:
             summary=o.summary,
             chat_id=o.chat_id,
             topic_id=o.topic_id,
+            transport=o.transport,
         )
         atask = asyncio.create_task(
             self._run_async(task),
@@ -286,6 +290,7 @@ class InterAgentBus:
                         original_message=task.message,
                         chat_id=task.chat_id,
                         topic_id=task.topic_id,
+                        transport=task.transport,
                     )
                 )
                 return
@@ -324,6 +329,7 @@ class InterAgentBus:
                     original_message=task.message,
                     chat_id=task.chat_id,
                     topic_id=task.topic_id,
+                    transport=task.transport,
                 )
             )
 
@@ -347,6 +353,7 @@ class InterAgentBus:
                     original_message=task.message,
                     chat_id=task.chat_id,
                     topic_id=task.topic_id,
+                    transport=task.transport,
                 )
             )
 
@@ -365,6 +372,7 @@ class InterAgentBus:
                     original_message=task.message,
                     chat_id=task.chat_id,
                     topic_id=task.topic_id,
+                    transport=task.transport,
                 )
             )
 

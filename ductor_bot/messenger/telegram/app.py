@@ -1446,7 +1446,7 @@ class TelegramBot:
             logger.warning("No chat_id available for async interagent result delivery")
             return
         set_log_context(operation="ia-async", chat_id=chat_id)
-        await self._bus.submit(from_interagent_result(result, chat_id))
+        await self._bus.submit(from_interagent_result(result, chat_id, transport=result.transport))
 
     async def on_task_result(self, result: TaskResult) -> None:
         """Handle background task result via the message bus."""
@@ -1459,15 +1459,17 @@ class TelegramBot:
             logger.warning("No chat_id for task result delivery (task=%s)", result.task_id)
             return
         set_log_context(operation="task", chat_id=chat_id)
-        await self._bus.submit(from_task_result(result))
+        await self._bus.submit(from_task_result(result, transport=result.transport))
 
-    async def on_task_question(
+    async def on_task_question(  # noqa: PLR0913
         self,
         task_id: str,
         question: str,
         prompt_preview: str,
         chat_id: int,
         thread_id: int | None = None,
+        *,
+        transport: str = "tg",
     ) -> None:
         """Deliver a background task question via the message bus."""
         from ductor_bot.bus.adapters import from_task_question
@@ -1479,7 +1481,14 @@ class TelegramBot:
             return
         set_log_context(operation="task", chat_id=chat_id)
         await self._bus.submit(
-            from_task_question(task_id, question, prompt_preview, chat_id, topic_id=thread_id)
+            from_task_question(
+                task_id,
+                question,
+                prompt_preview,
+                chat_id,
+                topic_id=thread_id,
+                transport=transport,
+            )
         )
 
     async def _handle_webhook_wake(self, chat_id: int, prompt: str) -> str | None:

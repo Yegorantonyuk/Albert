@@ -55,6 +55,7 @@ async def _inject_prompt(  # noqa: PLR0913
         append_system_prompt=files_block,
         chat_id=chat_id,
         topic_id=topic_id,
+        transport=transport,
         process_label=process_label,
         provider_override=active.provider if active else None,
         model_override=active.model if active else None,
@@ -237,7 +238,6 @@ async def handle_interagent_message(
             prompt=prompt,
             append_system_prompt=files_block,
             chat_id=chat_id,
-            transport=transport,
             process_label=f"interagent:{sender}",
             effort_override=ns.reasoning_effort or None,
             resume_session=None,
@@ -328,7 +328,14 @@ async def handle_async_interagent_result(
     )
 
     try:
-        return await _inject_prompt(orch, prompt, chat_id, f"interagent-async:{recipient}")
+        return await _inject_prompt(
+            orch,
+            prompt,
+            chat_id,
+            f"interagent-async:{recipient}",
+            topic_id=result.topic_id,
+            transport=result.transport,
+        )
     except Exception:
         logger.exception(
             "Async inter-agent result handling failed (from=%s)",

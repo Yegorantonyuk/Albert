@@ -48,13 +48,19 @@ def _make_cli_service(
     return cli
 
 
-def _submit(prompt: str = "test", name: str = "Test Task") -> TaskSubmit:
+def _submit(
+    prompt: str = "test",
+    name: str = "Test Task",
+    *,
+    transport: str = "tg",
+) -> TaskSubmit:
     return TaskSubmit(
         chat_id=42,
         prompt=prompt,
         message_id=1,
         thread_id=None,
         parent_agent="main",
+        transport=transport,
         name=name,
     )
 
@@ -69,7 +75,7 @@ class TestSubmit:
             cli_service=_make_cli_service(),
             config=_make_config(),
         )
-        task_id = hub.submit(_submit())
+        task_id = hub.submit(_submit(transport="mx"))
         assert isinstance(task_id, str)
         assert len(task_id) == 8  # hex(4)
 
@@ -124,7 +130,7 @@ class TestRunAndDeliver:
         )
         hub.set_result_handler("main", handler)
 
-        task_id = hub.submit(_submit())
+        task_id = hub.submit(_submit(transport="mx"))
         await asyncio.sleep(0.1)  # Let task run
 
         assert len(delivered) == 1
@@ -133,10 +139,12 @@ class TestRunAndDeliver:
         assert delivered[0].result_text.startswith("task output")
         assert "resume_task.py" in delivered[0].result_text  # resume hint appended
         assert delivered[0].name == "Test Task"
+        assert delivered[0].transport == "mx"
 
         entry = registry.get(task_id)
         assert entry is not None
         assert entry.status == "done"
+        assert entry.transport == "mx"
 
         await hub.shutdown()
 
@@ -158,11 +166,12 @@ class TestRunAndDeliver:
             config=_make_config(),
         )
 
-        task_id = hub.submit(_submit())
+        task_id = hub.submit(_submit(transport="dc"))
         await asyncio.sleep(0.1)
 
         assert captured
         assert captured[0].process_label == f"task:{task_id}"
+        assert captured[0].transport == "dc"
 
         await hub.shutdown()
 
@@ -182,11 +191,12 @@ class TestRunAndDeliver:
         )
         hub.set_result_handler("main", AsyncMock(side_effect=delivered.append))
 
-        hub.submit(_submit())
+        hub.submit(_submit(transport="mx"))
         await asyncio.sleep(0.1)
 
         assert len(delivered) == 1
         assert delivered[0].status == "failed"
+        assert delivered[0].transport == "mx"
         assert "rate limit" in delivered[0].error.lower()
 
         await hub.shutdown()
@@ -237,7 +247,7 @@ class TestRunAndDeliver:
         )
         hub.set_result_handler("main", AsyncMock(side_effect=delivered.append))
 
-        task_id = hub.submit(_submit())
+        task_id = hub.submit(_submit(transport="dc"))
         # Write partial memory BEFORE the task's execute mock returns — the
         # task folder is seeded synchronously on submit, so this is safe.
         memory = registry.taskmemory_path(task_id)
@@ -248,6 +258,7 @@ class TestRunAndDeliver:
 
         assert len(delivered) == 1
         assert delivered[0].status == "cancelled"
+        assert delivered[0].transport == "dc"
         assert "partial research findings" in delivered[0].result_text
         assert "CONTENT FROM TASKMEMORY.MD" in delivered[0].result_text
 
@@ -621,6 +632,7 @@ class TestForwardQuestion:
         # Handler is called asynchronously (fire-and-forget)
         await asyncio.sleep(0.05)
         question_handler.assert_called_once()
+        assert question_handler.call_args.kwargs["transport"] == "tg"
 
     async def test_increments_question_count(self, registry: TaskRegistry, tmp_path: Path) -> None:
         hub = TaskHub(
@@ -733,8 +745,15 @@ class TestResume:
         return hub
 
     async def test_resume_reuses_same_task(self, registry: TaskRegistry, tmp_path: Path) -> None:
-        hub = self._hub(registry, tmp_path)
-        task_id = hub.submit(_submit())
+        cli = _make_cli_service()
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
+        task_id = hub.submit(_submit(transport="mx"))
         await asyncio.sleep(0.1)
 
         entry = registry.get(task_id)
@@ -750,6 +769,8 @@ class TestResume:
         assert entry is not None
         assert entry.status == "done"  # Completed again
         assert entry.name == "Test Task"
+        assert entry.transport == "mx"
+        assert cli.execute.await_args.args[0].transport == "mx"
 
     async def test_resume_uses_original_provider_model(
         self, registry: TaskRegistry, tmp_path: Path

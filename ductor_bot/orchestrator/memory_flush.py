@@ -116,6 +116,7 @@ class MemoryFlusher:
             prompt=self._config.flush_prompt,
             chat_id=key.chat_id,
             topic_id=key.topic_id,
+            transport=key.transport,
             resume_session=session_id,
             process_label="memory_flush",
         )
@@ -144,6 +145,7 @@ class MemoryFlusher:
             prompt=prompt,
             chat_id=key.chat_id,
             topic_id=key.topic_id,
+            transport=key.transport,
             resume_session=session_id,
             process_label="memory_compact",
         )

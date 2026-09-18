@@ -25,6 +25,14 @@ class TestHeartbeatTargetConfig:
         assert target.prompt is None
         assert target.ack_token is None
         assert target.interval_minutes is None
+        assert target.transport == "tg"
+
+    def test_transport_roundtrip_and_legacy_default(self) -> None:
+        target = HeartbeatTarget.model_validate({"chat_id": 123, "transport": "mx"})
+        legacy = HeartbeatTarget.model_validate({"chat_id": 456})
+
+        assert target.model_dump()["transport"] == "mx"
+        assert legacy.transport == "tg"
 
     def test_target_with_all_overrides(self) -> None:
         target = HeartbeatTarget(
@@ -206,7 +214,7 @@ class TestPerTargetPromptAckInTick:
         with time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)):
             await obs._tick()
 
-        handler.assert_awaited_once_with(-1001, None, "Check servers", "SERVER_OK")
+        handler.assert_awaited_once_with(-1001, None, "Check servers", "SERVER_OK", "tg")
 
     async def test_tick_passes_none_for_default_user_targets(self) -> None:
         """User targets (allowed_user_ids) use None prompt/ack (global fallback)."""
@@ -225,7 +233,7 @@ class TestPerTargetPromptAckInTick:
         with time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)):
             await obs._tick()
 
-        handler.assert_awaited_once_with(100, None, None, None)
+        handler.assert_awaited_once_with(100, None, None, None, "tg")
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +263,20 @@ class TestHeartbeatValidation:
         with time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)):
             await obs._tick()
 
-        handler.assert_awaited_once_with(100, None, None, None)
+        handler.assert_awaited_once_with(100, None, None, None, "tg")
+
+    async def test_non_telegram_target_does_not_use_telegram_validator(self) -> None:
+        validator = AsyncMock(return_value=False)
+        handler = AsyncMock(return_value=None)
+        obs = _make_observer(targets=[HeartbeatTarget(chat_id=-1001, transport="api")])
+        obs.set_heartbeat_handler(handler)
+        obs.set_chat_validator(validator)
+
+        with time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)):
+            await obs._tick()
+
+        validator.assert_not_awaited()
+        handler.assert_any_await(-1001, None, "Global prompt", "HEARTBEAT_OK", "api")
 
     async def test_cache_expires_after_one_hour(self) -> None:
         validator = AsyncMock(return_value=True)
@@ -320,7 +341,7 @@ class TestPerTargetInterval:
         obs.set_heartbeat_handler(handler)
         obs._start_target_loops()
 
-        assert (-1001, None) in obs._target_tasks
+        assert ("tg", -1001, None) in obs._target_tasks
 
         with time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)):
             await obs._tick()

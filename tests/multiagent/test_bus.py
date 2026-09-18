@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
+import ductor_bot.multiagent.bus as bus_module
 from ductor_bot.multiagent.bus import AsyncSendOptions, InterAgentBus
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _make_stack(
@@ -170,7 +175,9 @@ class TestBusAsyncSend:
         assert task_id is not None
         await asyncio.sleep(0.1)  # let task finish
 
-    async def test_send_async_timeout(self) -> None:
+    async def test_send_async_timeout_preserves_transport(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         bus = InterAgentBus()
         stack = _make_stack()
 
@@ -184,12 +191,14 @@ class TestBusAsyncSend:
         delivered: list[object] = []
         bus.set_async_result_handler("sender", AsyncMock(side_effect=delivered.append))
 
-        # The default timeout is 300s, but we can test cancel instead
-        task_id = bus.send_async("sender", "slow", "Hello")
+        monkeypatch.setattr(bus_module, "_ASYNC_TIMEOUT", 0.01)
+        task_id = bus.send_async("sender", "slow", "Hello", opts=AsyncSendOptions(transport="api"))
         assert task_id is not None
+        await asyncio.sleep(0.05)
 
-        cancelled = await bus.cancel_all_async()
-        assert cancelled == 1
+        assert len(delivered) == 1
+        assert delivered[0].success is False
+        assert delivered[0].transport == "api"
 
 
 class TestBusCancelAllAsync:
@@ -432,7 +441,7 @@ class TestBusChatTopicPropagation:
             "sender",
             "target",
             "Hello",
-            opts=AsyncSendOptions(chat_id=12345, topic_id=678),
+            opts=AsyncSendOptions(chat_id=12345, topic_id=678, transport="mx"),
         )
         await asyncio.sleep(0.1)
 
@@ -440,6 +449,7 @@ class TestBusChatTopicPropagation:
         result = delivered[0]
         assert result.chat_id == 12345
         assert result.topic_id == 678
+        assert result.transport == "mx"
         assert result.success is True
 
     async def test_async_result_defaults_without_context(self) -> None:
@@ -457,6 +467,7 @@ class TestBusChatTopicPropagation:
         result = delivered[0]
         assert result.chat_id == 0
         assert result.topic_id is None
+        assert result.transport == "tg"
 
     async def test_error_result_carries_chat_and_topic_id(self) -> None:
         """chat_id/topic_id are preserved even when the task fails."""
@@ -474,7 +485,7 @@ class TestBusChatTopicPropagation:
             "sender",
             "target",
             "Hello",
-            opts=AsyncSendOptions(chat_id=99999, topic_id=42),
+            opts=AsyncSendOptions(chat_id=99999, topic_id=42, transport="dc"),
         )
         await asyncio.sleep(0.1)
 
@@ -483,6 +494,7 @@ class TestBusChatTopicPropagation:
         assert result.success is False
         assert result.chat_id == 99999
         assert result.topic_id == 42
+        assert result.transport == "dc"
 
     async def test_no_orchestrator_result_carries_context(self) -> None:
         """chat_id/topic_id are preserved when orchestrator is None."""
@@ -498,7 +510,7 @@ class TestBusChatTopicPropagation:
             "sender",
             "target",
             "Hello",
-            opts=AsyncSendOptions(chat_id=111, topic_id=222),
+            opts=AsyncSendOptions(chat_id=111, topic_id=222, transport="api"),
         )
         await asyncio.sleep(0.1)
 
@@ -507,3 +519,4 @@ class TestBusChatTopicPropagation:
         assert result.success is False
         assert result.chat_id == 111
         assert result.topic_id == 222
+        assert result.transport == "api"

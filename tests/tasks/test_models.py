@@ -16,6 +16,7 @@ class TestTaskEntry:
             provider="claude",
             model="opus",
             status="running",
+            transport="mx",
             session_id="sess-1",
             created_at=1000.0,
             question_count=2,
@@ -30,6 +31,7 @@ class TestTaskEntry:
         assert restored.provider == "claude"
         assert restored.model == "opus"
         assert restored.status == "running"
+        assert restored.transport == "mx"
         assert restored.session_id == "sess-1"
         assert restored.question_count == 2
 
@@ -40,11 +42,18 @@ class TestTaskEntry:
         assert entry.name == ""
         assert entry.status == "running"
         assert entry.question_count == 0
+        assert entry.transport == "tg"
 
     def test_reasoning_effort_roundtrip(self) -> None:
         entry = TaskEntry(
-            task_id="e1", chat_id=1, parent_agent="main", name="t",
-            prompt_preview="p", provider="claude", model="opus", status="running",
+            task_id="e1",
+            chat_id=1,
+            parent_agent="main",
+            name="t",
+            prompt_preview="p",
+            provider="claude",
+            model="opus",
+            status="running",
             reasoning_effort="high",
         )
         restored = TaskEntry.from_dict(entry.to_dict())
@@ -141,6 +150,7 @@ class TestTaskSubmit:
         assert sub.name == ""
         assert sub.provider_override == ""
         assert sub.thinking_override == ""
+        assert sub.transport == "tg"
 
 
 class TestTaskResult:
@@ -159,6 +169,7 @@ class TestTaskResult:
         )
         assert result.status == "done"
         assert result.error == ""
+        assert result.transport == "tg"
 
     def test_thread_id_default(self) -> None:
         result = TaskResult(

@@ -75,6 +75,7 @@ class AgentRequest:
     continue_session: bool = False
     timeout_seconds: float | None = None
     timeout_controller: TimeoutController | None = None
+    transport: str = "tg"
 
 
 @dataclass(frozen=True, slots=True)

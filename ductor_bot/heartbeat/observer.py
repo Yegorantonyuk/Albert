@@ -18,11 +18,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Callback signature: (chat_id, alert_text, topic_id)
-HeartbeatResultCallback = Callable[[int, str, int | None], Awaitable[None]]
+# Callback signature: (chat_id, alert_text, topic_id, transport)
+HeartbeatResultCallback = Callable[[int, str, int | None, str], Awaitable[None]]
 
-# Handler signature: (chat_id, topic_id, prompt_override, ack_token_override)
-HeartbeatHandler = Callable[[int, int | None, str | None, str | None], Awaitable[str | None]]
+# Handler signature: (chat_id, topic_id, prompt_override, ack_token_override, transport)
+HeartbeatHandler = Callable[[int, int | None, str | None, str | None, str], Awaitable[str | None]]
 
 # Validator signature: (chat_id) -> is_accessible
 ChatValidator = Callable[[int], Awaitable[bool]]
@@ -46,9 +46,9 @@ class HeartbeatObserver(BaseObserver):
         self._is_chat_busy: Callable[[int], bool] | None = None
         self._stale_cleanup: Callable[[], Awaitable[int]] | None = None
         self._chat_validator: ChatValidator | None = None
-        self._valid_targets: dict[int, float] = {}
-        self._target_last_run: dict[tuple[int, int | None], float] = {}
-        self._target_tasks: dict[tuple[int | None, int | None], asyncio.Task[None]] = {}
+        self._valid_targets: dict[tuple[str, int], float] = {}
+        self._target_last_run: dict[tuple[str, int, int | None], float] = {}
+        self._target_tasks: dict[tuple[str, int | None, int | None], asyncio.Task[None]] = {}
 
     @property
     def _hb(self) -> HeartbeatConfig:
@@ -111,7 +111,7 @@ class HeartbeatObserver(BaseObserver):
             interval = target.interval_minutes or self._hb.interval_minutes
             if interval == self._hb.interval_minutes and target.interval_minutes is None:
                 continue  # No custom interval → runs with global tick
-            key = (target.chat_id, target.topic_id)
+            key = (target.transport, target.chat_id, target.topic_id)
             task = asyncio.create_task(self._target_loop(target, interval))
             task.add_done_callback(lambda _: None)
             self._target_tasks[key] = task
@@ -132,16 +132,15 @@ class HeartbeatObserver(BaseObserver):
                     continue
                 if not target.enabled:
                     continue
-                if not await self._validate_target(target.chat_id):
+                if not await self._validate_target(target.chat_id, target.transport):
                     continue
-                prompt, ack_token, quiet_start, quiet_end = self._resolve_target_settings(
-                    target
-                )
+                prompt, ack_token, quiet_start, quiet_end = self._resolve_target_settings(target)
                 if self._is_target_quiet(target.chat_id, quiet_start, quiet_end):
                     continue
                 await self._run_for_chat(
                     target.chat_id,
                     target.topic_id,
+                    transport=target.transport,
                     prompt=prompt,
                     ack_token=ack_token,
                     quiet_start=quiet_start,
@@ -161,13 +160,16 @@ class HeartbeatObserver(BaseObserver):
         quiet_end = target.quiet_end if target.quiet_end is not None else self._hb.quiet_end
         return prompt, ack_token, quiet_start, quiet_end
 
-    async def _validate_target(self, chat_id: int) -> bool:
+    async def _validate_target(self, chat_id: int, transport: str = "tg") -> bool:
         """Check if a group target is accessible, with TTL cache."""
+        if transport != "tg":
+            return True
         if self._chat_validator is None:
             return True
 
         now = time.time()
-        last = self._valid_targets.get(chat_id)
+        key = (transport, chat_id)
+        last = self._valid_targets.get(key)
         if last is not None and (now - last) < _VALIDATION_TTL:
             return True
 
@@ -180,7 +182,7 @@ class HeartbeatObserver(BaseObserver):
             return False
 
         if valid:
-            self._valid_targets[chat_id] = now
+            self._valid_targets[key] = now
             return True
 
         logger.warning("Heartbeat target %d is not accessible, skipping", chat_id)
@@ -190,7 +192,7 @@ class HeartbeatObserver(BaseObserver):
         """Return True if the target has a custom interval that has not yet elapsed."""
         if target.interval_minutes is None:
             return False
-        key = (target.chat_id or 0, target.topic_id)
+        key = (target.transport, target.chat_id or 0, target.topic_id)
         last_run = self._target_last_run.get(key, 0.0)
         if (now - last_run) < target.interval_minutes * 60:
             logger.debug(
@@ -271,15 +273,16 @@ class HeartbeatObserver(BaseObserver):
             if not target.enabled or target.chat_id is None:
                 continue
             # Targets with custom intervals run in their own loop
-            if (target.chat_id, target.topic_id) in self._target_tasks:
+            if (target.transport, target.chat_id, target.topic_id) in self._target_tasks:
                 continue
-            if not await self._validate_target(target.chat_id):
+            if not await self._validate_target(target.chat_id, target.transport):
                 continue
 
             prompt, ack_token, quiet_start, quiet_end = self._resolve_target_settings(target)
             await self._run_for_chat(
                 target.chat_id,
                 target.topic_id,
+                transport=target.transport,
                 prompt=prompt,
                 ack_token=ack_token,
                 quiet_start=quiet_start,
@@ -312,6 +315,7 @@ class HeartbeatObserver(BaseObserver):
         ack_token: str | None = None,
         quiet_start: int | None = None,
         quiet_end: int | None = None,
+        transport: str = "tg",
     ) -> None:
         """Execute a single heartbeat for one chat."""
         set_log_context(operation="hb", chat_id=chat_id)
@@ -327,7 +331,13 @@ class HeartbeatObserver(BaseObserver):
             return
 
         try:
-            alert_text = await self._handle_heartbeat(chat_id, topic_id, prompt, ack_token)
+            alert_text = await self._handle_heartbeat(
+                chat_id,
+                topic_id,
+                prompt,
+                ack_token,
+                transport,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -339,7 +349,7 @@ class HeartbeatObserver(BaseObserver):
 
         if self._on_result:
             try:
-                await self._on_result(chat_id, alert_text, topic_id)
+                await self._on_result(chat_id, alert_text, topic_id, transport)
             except asyncio.CancelledError:
                 raise
             except Exception:

@@ -169,7 +169,7 @@ class TestMultiBotAdapterDelegation:
         fake_tg.set_abort_all_callback.assert_called_once_with(cb)
         fake_mx.set_abort_all_callback.assert_called_once_with(cb)
 
-    async def test_on_async_interagent_result_fans_out(self) -> None:
+    async def test_on_async_interagent_result_routes_to_origin_transport(self) -> None:
         config = _make_config()
         fake_tg = _make_bot()
         fake_mx = _make_bot()
@@ -180,12 +180,12 @@ class TestMultiBotAdapterDelegation:
         ):
             adapter = MultiBotAdapter(config)
 
-        result = MagicMock()
+        result = MagicMock(transport="mx")
         await adapter.on_async_interagent_result(result)
-        fake_tg.on_async_interagent_result.assert_awaited_once_with(result)
+        fake_tg.on_async_interagent_result.assert_not_awaited()
         fake_mx.on_async_interagent_result.assert_awaited_once_with(result)
 
-    async def test_on_task_result_fans_out(self) -> None:
+    async def test_on_task_result_legacy_default_routes_to_telegram(self) -> None:
         config = _make_config()
         fake_tg = _make_bot()
         fake_mx = _make_bot()
@@ -196,12 +196,12 @@ class TestMultiBotAdapterDelegation:
         ):
             adapter = MultiBotAdapter(config)
 
-        result = MagicMock()
+        result = MagicMock(transport="tg")
         await adapter.on_task_result(result)
         fake_tg.on_task_result.assert_awaited_once_with(result)
-        fake_mx.on_task_result.assert_awaited_once_with(result)
+        fake_mx.on_task_result.assert_not_awaited()
 
-    async def test_on_task_question_fans_out(self) -> None:
+    async def test_on_task_question_routes_to_origin_transport(self) -> None:
         config = _make_config()
         fake_tg = _make_bot()
         fake_mx = _make_bot()
@@ -212,9 +212,31 @@ class TestMultiBotAdapterDelegation:
         ):
             adapter = MultiBotAdapter(config)
 
-        await adapter.on_task_question("t1", "q?", "preview", 123, 456)
-        fake_tg.on_task_question.assert_awaited_once_with("t1", "q?", "preview", 123, 456)
-        fake_mx.on_task_question.assert_awaited_once_with("t1", "q?", "preview", 123, 456)
+        await adapter.on_task_question("t1", "q?", "preview", 123, 456, transport="mx")
+        fake_tg.on_task_question.assert_not_awaited()
+        fake_mx.on_task_question.assert_awaited_once_with(
+            "t1", "q?", "preview", 123, 456, transport="mx"
+        )
+
+    async def test_unavailable_origin_transport_is_logged_and_not_delivered(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = _make_config()
+        fake_tg = _make_bot()
+        fake_mx = _make_bot()
+
+        with patch(
+            "ductor_bot.messenger.registry._create_single_bot",
+            side_effect=[fake_tg, fake_mx],
+        ):
+            adapter = MultiBotAdapter(config)
+
+        result = MagicMock(transport="api")
+        await adapter.on_task_result(result)
+
+        fake_tg.on_task_result.assert_not_awaited()
+        fake_mx.on_task_result.assert_not_awaited()
+        assert "No configured bot for origin transport 'api'" in caplog.text
 
 
 class TestMultiBotAdapterRun:

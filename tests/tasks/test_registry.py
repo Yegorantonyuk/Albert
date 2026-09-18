@@ -18,13 +18,14 @@ def registry(tmp_path: Path) -> TaskRegistry:
     )
 
 
-def _submit(prompt: str = "test prompt", name: str = "") -> TaskSubmit:
+def _submit(prompt: str = "test prompt", name: str = "", transport: str = "tg") -> TaskSubmit:
     return TaskSubmit(
         chat_id=42,
         prompt=prompt,
         message_id=1,
         thread_id=None,
         parent_agent="main",
+        transport=transport,
         name=name,
     )
 
@@ -47,7 +48,7 @@ class TestCreate:
         assert entry.name == entry.task_id  # Fallback to task_id
 
     def test_persists_to_json(self, registry: TaskRegistry, tmp_path: Path) -> None:
-        registry.create(_submit(name="A"), "claude", "opus")
+        registry.create(_submit(name="A", transport="mx"), "claude", "opus")
         registry.create(_submit(name="B"), "codex", "gpt-4.1")
 
         # Reload and verify
@@ -56,6 +57,8 @@ class TestCreate:
             tasks_dir=tmp_path / "tasks",
         )
         assert len(reg2.list_all()) == 2
+        restored = next(entry for entry in reg2.list_all() if entry.name == "A")
+        assert restored.transport == "mx"
 
 
 class TestGet:

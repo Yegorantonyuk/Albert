@@ -725,6 +725,8 @@ def test_is_invalid_session_case_insensitive() -> None:
         is_error=True,
     )
     assert _is_invalid_session(response) is True
+
+
 def test_finish_normal_non_empty_success_unchanged() -> None:
     """#84 non-regression: non-empty successful response passes through."""
     from ductor_bot.orchestrator.flows import _finish_normal
@@ -771,15 +773,19 @@ async def test_heartbeat_excludes_appended_files(orch: Orchestrator) -> None:
     orch._config.append_system_prompt_files = ["PERSONA.md"]
     (orch.paths.workspace / "PERSONA.md").write_text("You are helpful.")
     orch._config.heartbeat.cooldown_minutes = 0
-    await _establish_session(orch)
+    object.__setattr__(orch._cli_service, "execute", AsyncMock(return_value=_mock_response()))
+    await normal(orch, SessionKey(transport="mx", chat_id=1), "Setup")
 
     mock_execute = AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK"))
     object.__setattr__(orch._cli_service, "execute", mock_execute)
-    await heartbeat_flow(orch, SessionKey(chat_id=1))
+    await heartbeat_flow(orch, SessionKey(transport="mx", chat_id=1))
 
     assert mock_execute.await_count == 1
     request = mock_execute.await_args[0][0]
     assert request.append_system_prompt is None
+    assert request.transport == "mx"
+
+
 # -- per-session effort: capture-on-first-use + creation-time fixed ----------
 
 
@@ -812,7 +818,7 @@ async def test_existing_topic_effort_fixed_when_global_default_changes(
     await normal(orch, existing, "first")  # captures "low"
 
     orch._config.reasoning_effort = "high"  # global default changes
-    await normal(orch, existing, "again")   # existing topic must stay "low"
+    await normal(orch, existing, "again")  # existing topic must stay "low"
     fresh = SessionKey(chat_id=1, topic_id=20)
     await normal(orch, fresh, "new topic")  # new topic captures "high"
 

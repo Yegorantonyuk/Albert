@@ -66,13 +66,15 @@ class BotProtocol(Protocol):
         """Handle background task completion."""
         ...
 
-    async def on_task_question(
+    async def on_task_question(  # noqa: PLR0913
         self,
         task_id: str,
         question: str,
         prompt_preview: str,
         chat_id: int,
         thread_id: int | None = None,
+        *,
+        transport: str = "tg",
     ) -> None:
         """Handle background task question delivery."""
         ...

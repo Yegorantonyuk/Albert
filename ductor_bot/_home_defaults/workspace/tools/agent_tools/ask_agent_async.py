@@ -2,15 +2,16 @@
 """Send an async task to another agent via the InterAgentBus.
 
 Unlike ask_agent.py, this returns immediately with a task_id.
-The sub-agent's response is delivered back to YOUR Telegram chat
-(the calling agent's chat) when ready — NOT to the sub-agent's chat.
+The sub-agent's response is delivered back to YOUR originating chat
+when ready — NOT to the sub-agent's chat.
 
 The response ALWAYS comes back to YOU (the calling agent). There is no way
-to make the sub-agent reply in its own Telegram chat via this tool.
+to make the sub-agent reply in its own chat via this tool.
 
 Uses the internal localhost HTTP API to communicate with the bus.
 Environment variables DUCTOR_AGENT_NAME, DUCTOR_INTERAGENT_PORT, and
-DUCTOR_INTERAGENT_HOST are automatically set by the Ductor framework.
+DUCTOR_INTERAGENT_HOST and DUCTOR_TRANSPORT are automatically set by the
+Ductor framework.
 
 Usage:
     python3 ask_agent_async.py [--new] [--summary "Short description"] TARGET_AGENT "Your message here"
@@ -63,9 +64,15 @@ def main() -> None:
     port = os.environ.get("DUCTOR_INTERAGENT_PORT", "8799")
     host = os.environ.get("DUCTOR_INTERAGENT_HOST", "127.0.0.1")
     sender = os.environ.get("DUCTOR_AGENT_NAME", "unknown")
+    transport = os.environ.get("DUCTOR_TRANSPORT", "tg")
 
     url = f"http://{host}:{port}/interagent/send_async"
-    body: dict[str, object] = {"from": sender, "to": target, "message": message}
+    body: dict[str, object] = {
+        "from": sender,
+        "to": target,
+        "message": message,
+        "transport": transport,
+    }
     if new_session:
         body["new_session"] = True
     if summary:
