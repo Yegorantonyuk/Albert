@@ -113,6 +113,7 @@ class TestConfigReloader:
 
         on_hot = MagicMock()
         reloader = ConfigReloader(config_path, cfg, on_hot_reload=on_hot)
+        reloader._last_mtime -= 1  # rewrite may land in the same mtime tick as the initial write
 
         # Mutate the file
         self._write_config(config_path, model="opus")
@@ -129,6 +130,7 @@ class TestConfigReloader:
 
         on_restart = MagicMock()
         reloader = ConfigReloader(config_path, cfg, on_restart_needed=on_restart)
+        reloader._last_mtime -= 1  # rewrite may land in the same mtime tick as the initial write
 
         new_data = cfg.model_dump(mode="json")
         new_data["telegram_token"] = "new-token-value"
@@ -204,6 +206,7 @@ class TestConfigReloader:
             applied.update(hot)
 
         reloader = ConfigReloader(config_path, cfg, on_hot_reload=capture)
+        reloader._last_mtime -= 1  # rewrite may land in the same mtime tick as the initial write
 
         self._write_config(config_path, model="opus")
         await reloader._check()
@@ -221,6 +224,7 @@ class TestConfigReloader:
             applied.update(hot)
 
         reloader = ConfigReloader(config_path, cfg, on_hot_reload=capture)
+        reloader._last_mtime -= 1  # rewrite may land in the same mtime tick as the initial write
 
         self._write_config(config_path, project_roots={"my-project": "~/code/my-project"})
         await reloader._check()
