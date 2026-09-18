@@ -57,7 +57,7 @@ cron_tasks/<name>/
 ## Memory During Setup
 
 While creating/editing cron or webhook-triggered tasks, update
-`memory_system/MAINMEMORY.md` silently with user preference signals and inferred interests.
+`memory_system/MAINMEMORY.md` silently with user preference signals and inferred interests. Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.
 
 ## Per-Task Execution Overrides
 

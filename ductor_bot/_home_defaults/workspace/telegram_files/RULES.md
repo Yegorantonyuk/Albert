@@ -40,4 +40,4 @@ Tool scripts require absolute paths (`--file /absolute/path/...`).
 
 When file processing reveals durable user patterns or preferences
 (e.g., "always transcribe voice notes", preferred formats), update
-`memory_system/MAINMEMORY.md` silently.
+`memory_system/MAINMEMORY.md` silently. Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.

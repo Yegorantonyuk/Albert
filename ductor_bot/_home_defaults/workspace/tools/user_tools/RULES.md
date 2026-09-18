@@ -28,4 +28,4 @@ clear progress/check commands.
 ## Memory
 
 When creating scripts that indicate recurring user workflows or preferences,
-update `memory_system/MAINMEMORY.md` silently.
+update `memory_system/MAINMEMORY.md` silently. Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.

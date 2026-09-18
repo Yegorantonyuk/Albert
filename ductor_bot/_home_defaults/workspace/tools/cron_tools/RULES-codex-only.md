@@ -108,7 +108,7 @@ Do not edit task-folder `AGENTS.md` manually.
 
 ## After Cron Setup
 
-Update `memory_system/MAINMEMORY.md` silently with inferred preference signals
+Update `memory_system/MAINMEMORY.md` silently with inferred preference signals Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.
 from the user's requested automation (not just "created job").
 
 ## Pitfalls

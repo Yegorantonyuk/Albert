@@ -45,4 +45,4 @@ No tool script needed — just create the file.
 ## Output and Memory
 
 - Save user deliverables in `../output_to_user/`.
-- Update `../memory_system/MAINMEMORY.md` silently for durable user facts/preferences.
+- Update `../memory_system/MAINMEMORY.md` silently for durable user facts/preferences. Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.

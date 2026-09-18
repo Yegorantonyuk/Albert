@@ -25,6 +25,7 @@ from ductor_bot.cli.stream_events import (
     ToolUseEvent,
 )
 from ductor_bot.cli.types import AgentRequest, AgentResponse, CLIResponse
+from ductor_bot.infra.colony_events import CURRENT_RUN, current_stage, record_cli_execution
 
 if TYPE_CHECKING:
     from ductor_bot.cli.base import BaseCLI
@@ -50,12 +51,26 @@ class _StreamCallbacks:
         self._on_compact_boundary = on_compact_boundary
         self.init_session_id: str | None = None
 
+    @staticmethod
+    def _record_stage(event: StreamEvent) -> None:
+        if isinstance(event, ToolUseEvent):
+            current_stage("working", event.tool_name)
+        elif isinstance(event, ThinkingEvent):
+            current_stage("thinking")
+        elif isinstance(event, CompactBoundaryEvent):
+            current_stage("organizing context")
+
     async def dispatch(self, event: StreamEvent) -> tuple[str, ResultEvent | None]:
         """Handle one event. Returns (accumulated_text_chunk, result_or_none)."""
         if isinstance(event, SystemInitEvent) and event.session_id:
+            run = CURRENT_RUN.get()
+            if run is not None:
+                run.fields["session_id"] = event.session_id
             self.init_session_id = event.session_id
             return "", None
+        self._record_stage(event)
         if isinstance(event, AssistantTextDelta) and event.text:
+            current_stage("Replying")
             if self._on_text is not None:
                 await self._on_text(event.text)
             return event.text, None
@@ -95,6 +110,7 @@ class CLIServiceConfig:
     max_budget_usd: float | None
     permission_mode: str
     reasoning_effort: str = "medium"
+    event_log_path: str = ""
     gemini_api_key: str | None = None
     docker_container: str = ""
     claude_cli_parameters: tuple[str, ...] = ()
@@ -148,6 +164,11 @@ class CLIService:
         """True when CLI calls run inside a Docker container."""
         return bool(self._config.docker_container)
 
+    @property
+    def available_providers(self) -> frozenset[str]:
+        """Last authenticated provider set supplied by the runtime, without probes."""
+        return self._available_providers
+
     def update_available_providers(self, providers: frozenset[str]) -> None:
         self._available_providers = providers
 
@@ -173,6 +194,7 @@ class CLIService:
             return request.model_override or f"<{request.provider_override} default>"
         return request.model_override or self._config.default_model
 
+    @record_cli_execution
     async def execute(self, request: AgentRequest) -> AgentResponse:
         """Execute a CLI call."""
         cli = self._make_cli(request)
@@ -196,6 +218,7 @@ class CLIService:
         self._log_call(request, agent_resp, elapsed_ms)
         return agent_resp
 
+    @record_cli_execution
     async def execute_streaming(
         self,
         request: AgentRequest,
@@ -362,7 +385,8 @@ class CLIService:
                 note = (
                     f"[ductor] Project cwd override active. The shared bot workspace "
                     f"(tools/, memory_system/) is at {self._config.working_dir}. Bot memory "
-                    f"lives at {self._config.working_dir}/memory_system/MAINMEMORY.md — always "
+                    f"index lives at {self._config.working_dir}/memory_system/MAINMEMORY.md (pointers only; "
+                    f"content goes to vault topic notes per memory_system/CLAUDE.md) — always "
                     f"address it by this absolute path, never via a relative path."
                 )
                 append_prompt = f"{append_prompt}\n\n{note}" if append_prompt else note
@@ -383,6 +407,7 @@ class CLIService:
                 process_registry=self._process_registry,
                 chat_id=request.chat_id,
                 topic_id=request.topic_id,
+                transport=request.transport,
                 process_label=request.process_label,
                 cli_parameters=self._config.cli_parameters_for_provider(provider),
                 agent_name=self._config.agent_name,

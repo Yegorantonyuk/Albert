@@ -40,5 +40,5 @@ To customize one, replace the symlink with a real directory of the same name.
 
 ## Memory
 
-When the user creates or customizes skills, update `memory_system/MAINMEMORY.md`
+When the user creates or customizes skills, update `memory_system/MAINMEMORY.md` Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.
 silently with inferred interests and workflow preferences.

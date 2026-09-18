@@ -95,10 +95,12 @@ MAINMEMORY_REMINDER = MessageHook(
     condition=every_n_messages(6),
     suffix=(
         "## MEMORY CHECK\n"
-        "Silently review: memory_system/MAINMEMORY.md, user_tools/, cron_tasks/.\n"
+        "Silently review: memory_system/MAINMEMORY.md (thin index), user_tools/, cron_tasks/.\n"
         "Compare what you already know with this conversation so far.\n"
         "If something important is missing from memory (personality, preferences, "
-        "decisions, facts) -- update MAINMEMORY.md silently.\n"
+        "decisions, facts) -- write it silently into the matching vault topic note per "
+        "memory_system/CLAUDE.md; add a one-line pointer to MAINMEMORY.md only for a NEW topic. "
+        "Never write content into MAINMEMORY.md itself.\n"
         "If you notice a gap that only the user can fill, ask ONE natural follow-up "
         "question that fits the current conversation. Do not interrogate."
     ),

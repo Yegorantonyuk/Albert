@@ -57,7 +57,7 @@ See `workspace/tools/agent_tools/CLAUDE.md` for all agent management tools.
 (server info, user preferences, infrastructure). Changes are automatically
 synced into every agent's `MAINMEMORY.md` by the Supervisor.
 
-- For agent-specific knowledge: use your own `memory_system/MAINMEMORY.md`.
+- For agent-specific knowledge: use your own memory — vault topic notes per `memory_system/CLAUDE.md`; `MAINMEMORY.md` is only the index.
 - For cross-agent knowledge: use `SHAREDMEMORY.md` (via
   `workspace/tools/agent_tools/edit_shared_knowledge.py`).
 
@@ -69,5 +69,5 @@ Do not manually edit `cron_jobs.json` or `webhooks.json` for normal operations.
 Then tell the user to run `/restart`.
 - Save user-facing generated files in `workspace/output_to_user/` and send with
 `<file:/absolute/path/to/output_to_user/...>`.
-- Update `workspace/memory_system/MAINMEMORY.md` silently when durable user facts
+- Update `workspace/memory_system/MAINMEMORY.md` silently when durable user facts Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.
 or preferences are learned.

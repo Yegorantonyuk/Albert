@@ -25,7 +25,7 @@ Only provide user-facing results.
 
 Read `memory_system/CLAUDE/GEMINI/AGENTS.md` for full format and cleanup rules.
 
-- Update `memory_system/MAINMEMORY.md` when durable user facts or preferences appear.
+- Update `memory_system/MAINMEMORY.md` when durable user facts or preferences appear. Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.
 - Update immediately if user says to remember something.
 - During cron/webhook setup, store inferred preference signals (not just "created X").
 - Never mention memory reads/writes to the user.

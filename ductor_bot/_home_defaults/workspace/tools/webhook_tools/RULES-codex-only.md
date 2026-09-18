@@ -215,7 +215,7 @@ HTTP statuses:
 
 ## Memory During Webhook Setup
 
-After creating/editing webhook automation, update `memory_system/MAINMEMORY.md`
+After creating/editing webhook automation, update `memory_system/MAINMEMORY.md` Follow the memory regimen in memory_system/CLAUDE.md: content goes into a vault topic note; MAINMEMORY.md gets a one-line pointer only when a NEW topic appears.
 silently with inferred user workflow preferences and interests.
 
 ## Per-Webhook Execution Overrides
