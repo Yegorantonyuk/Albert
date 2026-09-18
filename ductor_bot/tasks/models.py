@@ -37,6 +37,9 @@ class TaskSubmit:
     thinking_override: str = ""
     reasoning_effort_override: str = ""
     priority: str = _DEFAULT_PRIORITY
+    transport: str = "tg"
+    request_id: str = ""
+    parent_id: str = ""
 
 
 @dataclass(slots=True)
@@ -66,6 +69,12 @@ class TaskEntry:
     tasks_dir: str = ""  # Agent's tasks directory (for per-agent folder resolution)
     thread_id: int | None = None  # Forum topic ID (for routing results back to topic)
     priority: str = _DEFAULT_PRIORITY  # #79: interactive | background | batch
+    transport: str = "tg"
+    request_id: str = ""
+    parent_id: str = ""
+    last_request_id: str = ""
+    result_request_id: str = ""
+    resume_requests: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {
@@ -82,6 +91,12 @@ class TaskEntry:
             "provider": self.provider,
             "model": self.model,
             "status": self.status,
+            "transport": self.transport,
+            "request_id": self.request_id,
+            "last_request_id": self.last_request_id,
+            "result_request_id": self.result_request_id,
+            "resume_requests": self.resume_requests,
+            "parent_id": self.parent_id,
             "session_id": self.session_id,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
@@ -111,6 +126,12 @@ class TaskEntry:
             provider=d.get("provider", ""),
             model=d.get("model", ""),
             status=d.get("status", "running"),
+            transport=d.get("transport", "tg"),
+            request_id=d.get("request_id", ""),
+            last_request_id=d.get("last_request_id", d.get("request_id", "")),
+            result_request_id=d.get("result_request_id", ""),
+            resume_requests=d.get("resume_requests", {}),
+            parent_id=d.get("parent_id", ""),
             session_id=d.get("session_id", ""),
             created_at=d.get("created_at", 0.0),
             completed_at=d.get("completed_at", 0.0),
@@ -159,3 +180,4 @@ class TaskResult:
     task_folder: str = ""
     original_prompt: str = ""
     thread_id: int | None = None
+    transport: str = "tg"

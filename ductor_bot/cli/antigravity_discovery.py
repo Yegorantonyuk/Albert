@@ -59,5 +59,5 @@ def _parse_models(output: str) -> tuple[str, ...]:
         # A usage/help banner means the command was rejected — treat as failure.
         if name.startswith(("Usage:", "Flags:", "Available subcommands:")):
             return ()
-        models.append(name)
+        models.append(name.split("\t", 1)[0].strip())
     return tuple(models)

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
+from ductor_bot.infra.atomic_io import atomic_text_save
+from ductor_bot.infra.colony_events import CURRENT_RUN, ExecutionRun, event_path, scrub
+from ductor_bot.infra.json_store import atomic_json_save
 from ductor_bot.tasks.models import (
     TaskEntry,
     TaskInFlight,
@@ -34,8 +40,22 @@ _RESUMABLE = frozenset({"done", "failed", "cancelled", "waiting"})
 _MAINTENANCE_INTERVAL = 5 * 3600  # 5 hours
 
 TaskResultCallback = Callable[[TaskResult], Awaitable[None]]
-QuestionHandler = Callable[[str, str, str, int, int | None], Awaitable[None]]
-# QuestionHandler(task_id, question, prompt_preview, chat_id, thread_id) -> None
+
+
+class QuestionHandler(Protocol):
+    """Callback that delivers a task question to its origin transport."""
+
+    async def __call__(  # noqa: PLR0913
+        self,
+        task_id: str,
+        question: str,
+        prompt_preview: str,
+        chat_id: int,
+        thread_id: int | None,
+        *,
+        transport: str,
+    ) -> None: ...
+
 
 TASK_PROMPT_SUFFIX = """
 
@@ -103,6 +123,7 @@ class TaskHub:
         self._process_registry = process_registry
         self._agent_process_registries: dict[str, ProcessRegistry] = {}
         self._pending_deliveries: set[asyncio.Task[None]] = set()
+        self._colony_runs: dict[str, ExecutionRun] = {}
 
     def start_maintenance(self) -> None:
         """Start periodic orphan cleanup (call once after bot startup)."""
@@ -168,8 +189,25 @@ class TaskHub:
         """Create a task, spawn CLI subprocess. Returns task_id."""
         self._check_enabled()
 
+        if submit.request_id:
+            previous = next((e for e in self._registry.list_all()
+                             if e.request_id == submit.request_id), None)
+            if previous is not None:
+                if (previous.original_prompt != submit.prompt or
+                        previous.parent_agent != submit.parent_agent or
+                        previous.transport != submit.transport or
+                        (submit.provider_override and previous.provider != submit.provider_override) or
+                        (submit.model_override and previous.model != submit.model_override) or
+                        (submit.name and previous.name != submit.name)):
+                    raise ValueError("Request ID belongs to another task submission")
+                return previous.task_id
+        if submit.parent_id:
+            parent = self._registry.get(submit.parent_id)
+            if parent is None or parent.parent_agent != submit.parent_agent:
+                raise ValueError("Unknown parent task")
+
         # Resolve chat_id: CLI subprocess doesn't know it, look up from agent name
-        if not submit.chat_id:
+        if not submit.chat_id and submit.transport != "api":
             resolved = self._agent_chat_ids.get(submit.parent_agent, 0)
             if resolved:
                 submit.chat_id = resolved
@@ -224,7 +262,26 @@ class TaskHub:
         )
         return entry.task_id
 
-    def resume(self, task_id: str, follow_up: str, *, parent_agent: str = "") -> str:
+    @staticmethod
+    def _resume_identity(
+        entry: TaskEntry, follow_up: str, parent_agent: str, transport: str, request_id: str,
+    ) -> tuple[str, bool]:
+        """Validate ownership and identify a previously accepted continuation."""
+        if parent_agent and entry.parent_agent != parent_agent:
+            raise ValueError("Not authorized to resume this task")
+        if request_id and re.fullmatch(r"[A-Za-z0-9_-]{8,128}", request_id) is None:
+            raise ValueError("Invalid resume request ID")
+        payload = [follow_up, entry.parent_agent, transport or entry.transport]
+        fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
+        if request_id and request_id == entry.request_id:
+            raise ValueError("Request ID belongs to task creation")
+        previous = entry.resume_requests.get(request_id) if request_id else None
+        if previous is not None and previous != fingerprint:
+            raise ValueError("Request ID belongs to another task continuation")
+        return fingerprint, previous is not None
+
+    def resume(self, task_id: str, follow_up: str, *, parent_agent: str = "",
+               transport: str = "", request_id: str = "") -> str:
         """Resume a completed task's CLI session with a follow-up. Returns task_id."""
         self._check_enabled()
 
@@ -232,6 +289,11 @@ class TaskHub:
         if entry is None:
             msg = f"Task '{task_id}' not found"
             raise ValueError(msg)
+        fingerprint, replay = self._resume_identity(
+            entry, follow_up, parent_agent, transport, request_id,
+        )
+        if replay:
+            return task_id
         if entry.status not in _RESUMABLE:
             msg = f"Task '{task_id}' is still {entry.status}"
             raise ValueError(msg)
@@ -252,6 +314,11 @@ class TaskHub:
             msg = f"Task '{task_id}' is already running"
             raise ValueError(msg)
 
+        if transport and transport != "api":
+            raise ValueError("Unsupported resume transport override")
+        if transport == "api":
+            self._registry.update_status(task_id, entry.status, transport="api", chat_id=0)
+
         # Reset to running — same entry, same folder, same task_id
         self._registry.update_status(
             task_id,
@@ -260,6 +327,8 @@ class TaskHub:
             error="",
             result_preview="",
             last_question="",
+            last_request_id=request_id,
+            resume_requests={**entry.resume_requests, **({request_id: fingerprint} if request_id else {})},
         )
 
         # Append a short system reminder so the task agent remembers how to
@@ -297,15 +366,16 @@ class TaskHub:
     async def forward_question(self, task_id: str, question: str) -> str:
         """Forward a task agent's question to the parent. Returns immediately.
 
-        The question is delivered asynchronously to the parent agent's Telegram
-        chat. The parent answers by resuming the task with ``resume_task.py``.
+        The question is delivered asynchronously to the parent agent's origin
+        transport. The parent answers by resuming the task with ``resume_task.py``.
         """
         entry = self._registry.get(task_id)
         if entry is None:
             return "Error: Task not found"
 
+        api_only = entry.transport == "api" and entry.chat_id == 0
         handler = self._question_handlers.get(entry.parent_agent)
-        if handler is None:
+        if handler is None and not api_only:
             return f"Error: No question handler for agent '{entry.parent_agent}'"
 
         logger.info(
@@ -319,7 +389,7 @@ class TaskHub:
             task_id,
             entry.status,
             question_count=entry.question_count + 1,
-            last_question=question[:200],
+            last_question=scrub(question, 2000),
         )
 
         # Mark in-flight task so _run() uses "waiting" instead of "done"
@@ -327,7 +397,13 @@ class TaskHub:
         if inflight:
             inflight.has_pending_question = True
 
-        # Fire-and-forget: deliver to parent's Telegram chat
+        run = self._colony_runs.get(task_id)
+        if run is not None:
+            run.emit("waiting", stage="Waiting for input")
+        if api_only:
+            return "Question saved for Colony. Finish this turn; the owner will resume with an answer."
+
+        # Fire-and-forget: deliver to the parent's origin transport.
         task = asyncio.create_task(
             self._deliver_question(handler, entry, question),
             name=f"task-question:{task_id}",
@@ -353,6 +429,7 @@ class TaskHub:
                 entry.prompt_preview,
                 entry.chat_id,
                 entry.thread_id,
+                transport=entry.transport,
             )
         except Exception:
             logger.exception("Question delivery failed for task %s", entry.task_id)
@@ -468,7 +545,20 @@ class TaskHub:
         delivery_task.add_done_callback(self._pending_deliveries.discard)
         return delivery_task
 
-    async def _run(
+    def _record_colony_result(self, entry: TaskEntry, status: str, result: str, error: str, completed_at: float) -> None:
+        """Bind a full answer to its command before exposing terminal status."""
+        if entry.transport != "api" or entry.chat_id != 0:
+            return
+        folder = self._registry.task_folder(entry.task_id)
+        text = scrub(result, 128 * 1024, multiline=True)
+        atomic_json_save(folder / "RESULT.json", {"v": 1, "task_id": entry.task_id,
+            "request_id": entry.last_request_id, "status": status, "at": completed_at,
+            "result": text, "error": scrub(error, 4000, multiline=True),
+            "question": scrub(entry.last_question, 8192, multiline=True),
+            "provider": entry.provider, "model": entry.model})
+        atomic_text_save(folder / "RESULT.md", text)
+
+    async def _run(  # noqa: PLR0915
         self,
         entry: TaskEntry,
         prompt: str,
@@ -483,6 +573,14 @@ class TaskHub:
         assert cli is not None
 
         t0 = time.monotonic()
+        home = getattr(self._paths, "ductor_home", None)
+        from pathlib import Path
+        run = ExecutionRun(event_path(home) if isinstance(home, Path) else None,
+                           kind="task", task_id=entry.task_id, name=entry.name,
+                           provider=entry.provider, model=entry.model,
+                           parent_id=getattr(entry, "parent_id", "") or None)
+        self._colony_runs[entry.task_id] = run
+        context = CURRENT_RUN.set(run)
         final_delivery_started = False
         try:
             timeout = self._config.timeout_seconds
@@ -499,6 +597,7 @@ class TaskHub:
                 effort_override=entry.reasoning_effort or None,
                 chat_id=entry.chat_id,
                 topic_id=entry.thread_id,
+                transport=entry.transport,
                 process_label=f"task:{entry.task_id}",
                 timeout_seconds=timeout,
                 resume_session=resume_session,
@@ -513,7 +612,13 @@ class TaskHub:
                 entry.provider = eff_provider
                 entry.model = eff_model
 
-            response = await cli.execute(request)
+            run.fields.update(provider=eff_provider, model=eff_model)
+            run.emit("started")
+            # Real services expose normalized tool events; lightweight adapters
+            # may only implement execute(). No second process is started.
+            from ductor_bot.cli.service import CLIService
+            response = (await cli.execute_streaming(request) if isinstance(cli, CLIService)
+                        else await cli.execute(request))
 
             elapsed = time.monotonic() - t0
             inflight = self._in_flight.get(entry.task_id)
@@ -523,16 +628,23 @@ class TaskHub:
             # Accumulate turns (resume adds to previous count)
             total_turns = entry.num_turns + response.num_turns
 
+            completed_at = time.time()
+            self._record_colony_result(entry, status, response.result or "", error, completed_at)
             self._registry.update_status(
                 entry.task_id,
                 status,
                 session_id=response.session_id or "",
-                completed_at=time.time(),
+                completed_at=completed_at,
+                result_request_id=entry.last_request_id,
                 elapsed_seconds=elapsed,
                 error=error,
-                result_preview=(response.result or "")[:_RESULT_PREVIEW_LEN],
+                result_preview=scrub(response.result or "", _RESULT_PREVIEW_LEN),
                 num_turns=total_turns,
             )
+
+            run.finish({"done": "completed", "failed": "failed", "cancelled": "cancelled",
+                        "waiting": "waiting"}.get(status, "failed"),
+                       session_id=response.session_id or "", result_ref="task:" + entry.task_id)
 
             result_text = response.result or ""
             session_id = response.session_id or ""
@@ -565,6 +677,7 @@ class TaskHub:
                         elapsed_seconds=elapsed,
                         provider=entry.provider,
                         model=entry.model,
+                        transport=entry.transport,
                         session_id=session_id,
                         error=error,
                         task_folder=str(self._registry.task_folder(entry.task_id)),
@@ -581,12 +694,18 @@ class TaskHub:
                     entry.task_id,
                 )
                 raise
+            run.finish("cancelled")
             elapsed = time.monotonic() - t0
+            completed_at = time.time()
+            partial_text = _append_taskmemory("", self._registry.taskmemory_path(entry.task_id))
+            with contextlib.suppress(OSError):
+                self._record_colony_result(entry, "cancelled", partial_text, "", completed_at)
             self._registry.update_status(
                 entry.task_id,
                 "cancelled",
-                completed_at=time.time(),
+                completed_at=completed_at,
                 elapsed_seconds=elapsed,
+                result_request_id=entry.last_request_id,
             )
             # MED #1: include any partial TASKMEMORY.md the sub-agent wrote
             # before cancellation so the parent sees the progress, not silence.
@@ -605,6 +724,7 @@ class TaskHub:
                         elapsed_seconds=elapsed,
                         provider=entry.provider,
                         model=entry.model,
+                        transport=entry.transport,
                         original_prompt=entry.original_prompt,
                         thread_id=entry.thread_id,
                     )
@@ -615,12 +735,16 @@ class TaskHub:
             logger.exception("Task failed id=%s name='%s'", entry.task_id, entry.name)
             elapsed = time.monotonic() - t0
             error_msg = "Internal error (check logs)"
+            completed_at = time.time()
+            with contextlib.suppress(OSError):
+                self._record_colony_result(entry, "failed", "", error_msg, completed_at)
             self._registry.update_status(
                 entry.task_id,
                 "failed",
-                completed_at=time.time(),
+                completed_at=completed_at,
                 elapsed_seconds=elapsed,
                 error=error_msg,
+                result_request_id=entry.last_request_id,
             )
             with contextlib.suppress(Exception):
                 await self._deliver(
@@ -635,14 +759,21 @@ class TaskHub:
                         elapsed_seconds=elapsed,
                         provider=entry.provider,
                         model=entry.model,
+                        transport=entry.transport,
                         error=error_msg,
                         original_prompt=entry.original_prompt,
                         thread_id=entry.thread_id,
                     )
                 )
 
+        finally:
+            self._colony_runs.pop(entry.task_id, None)
+            CURRENT_RUN.reset(context)
+
     async def _deliver(self, result: TaskResult) -> None:
         """Deliver result to the parent agent's registered callback."""
+        if result.transport == "api" and result.chat_id == 0:
+            return
         handler = self._result_handlers.get(result.parent_agent)
         if handler is None:
             logger.warning(

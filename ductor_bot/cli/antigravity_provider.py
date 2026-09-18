@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ductor_bot.cli.antigravity_events import parse_antigravity_json
+from ductor_bot.cli.antigravity_events import parse_antigravity_json, parse_antigravity_session_id
 from ductor_bot.cli.base import BaseCLI, CLIConfig
 from ductor_bot.cli.executor import build_subprocess_env
 from ductor_bot.cli.process_registry import ProcessRegistry, TrackedProcess
@@ -196,6 +196,7 @@ class AntigravityCLI(BaseCLI):
 
         return CLIResponse(
             result=result_text,
+            session_id=parse_antigravity_session_id(stdout),
             is_error=is_error,
             returncode=proc.returncode,
             stderr=stderr,

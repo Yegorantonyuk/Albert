@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def parse_antigravity_json(raw: str) -> str:
     """Extract result text from Antigravity CLI ``--print`` output.
 
-    Tries to parse as JSON; falls back to raw text truncated to 2000 chars.
+    Tries to parse as JSON; falls back to raw text bounded to 128 KiB.
     """
     if not raw:
         return ""
@@ -33,4 +33,19 @@ def parse_antigravity_json(raw: str) -> str:
             return str(parsed)
         return str(parsed)
     except json.JSONDecodeError:
-        return raw[:2000]
+        return raw.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
+
+
+def parse_antigravity_session_id(raw: str) -> str | None:
+    """Preserve an explicit ID if the CLI emits one; never infer an ID."""
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    for key in ("conversation_id", "session_id"):
+        identity = value.get(key)
+        if isinstance(identity, str) and identity and len(identity) <= 128:
+            return identity
+    return None

@@ -13,12 +13,15 @@ The server also starts in **task-only mode** (no multi-agent bus) when
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from aiohttp import web
 
 if TYPE_CHECKING:
+    from ductor_bot.cli.service import CLIService
+    from ductor_bot.cron.observer import CronObserver
     from ductor_bot.multiagent.bus import InterAgentBus
     from ductor_bot.multiagent.health import AgentHealth
     from ductor_bot.tasks.hub import TaskHub
@@ -52,6 +55,8 @@ class InternalAgentAPI:
         self._bind_host = _BIND_ALL_HOST if docker_mode else "127.0.0.1"
         self._health_ref: dict[str, AgentHealth] | None = None
         self._task_hub: TaskHub | None = None
+        self._colony_observer: CronObserver | None = None
+        self._colony_cli: CLIService | None = None
         self._app = web.Application()
 
         # Inter-agent routes (only when bus is available)
@@ -69,6 +74,9 @@ class InternalAgentAPI:
         self._app.router.add_post("/tasks/cancel", self._handle_task_cancel)
         self._app.router.add_post("/tasks/delete", self._handle_task_delete)
 
+        self._app.router.add_get("/colony/crons", self._handle_colony_crons)
+        self._app.router.add_post("/colony/cron", self._handle_colony_cron)
+
         self._runner: web.AppRunner | None = None
 
     def set_health_ref(self, health: dict[str, AgentHealth]) -> None:
@@ -78,6 +86,54 @@ class InternalAgentAPI:
     def set_task_hub(self, hub: TaskHub) -> None:
         """Set the TaskHub for handling /tasks/* endpoints."""
         self._task_hub = hub
+
+    def set_colony_runtime(self, observer: CronObserver | None, cli: CLIService | None) -> None:
+        """Wire the already running main observer/service; no new runner."""
+        self._colony_observer = observer
+        self._colony_cli = cli
+
+    async def _handle_colony_crons(self, request: web.Request) -> web.Response:
+        observer = self._colony_observer
+        available = self._colony_cli.available_providers if self._colony_cli else frozenset()
+        tasks_enabled = bool(self._task_hub is not None and self._task_hub._config.enabled)
+        return web.json_response({
+            "success": True, "runtime": observer is not None or self._task_hub is not None,
+            "tasks_enabled": tasks_enabled,
+            "cron_actions_available": observer is not None,
+            "capabilities": {**dict.fromkeys(("create", "cancel", "resume", "retry", "review"), tasks_enabled),
+                             **dict.fromkeys(("cron_run", "cron_pause", "cron_enable"), observer is not None)},
+            "providers": [{"id": name, "available": name in available}
+                          for name in ("claude", "codex", "antigravity", "gemini")],
+            "crons": observer.colony_jobs() if observer is not None else [],
+        })
+
+    async def _handle_colony_cron(self, request: web.Request) -> web.Response:  # noqa: PLR0911
+        observer = self._colony_observer
+        if observer is None:
+            return web.json_response({"success": False, "error": "Cron runtime unavailable"}, status=503)
+        try:
+            data = await request.json()
+        except (ValueError, TypeError):
+            return web.json_response({"success": False, "error": "Invalid JSON"}, status=400)
+        if not isinstance(data, dict):
+            return web.json_response({"success": False, "error": "Invalid JSON object"}, status=400)
+        action, cron_id, request_id = data.get("action"), data.get("cron_id"), data.get("request_id")
+        if (action not in {"run", "pause", "enable"} or not isinstance(cron_id, str)
+                or not cron_id or len(cron_id) > 128 or not isinstance(request_id, str)
+                or re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", request_id) is None):
+            return web.json_response({"success": False, "error": "Invalid cron command"}, status=400)
+        try:
+            run_id = None
+            if action == "run":
+                run_id = observer.run_once(cron_id, request_id)
+            else:
+                await observer.colony_toggle(cron_id, enabled=action == "enable")
+        except KeyError:
+            return web.json_response({"success": False, "error": "Unknown cron"}, status=404)
+        except ValueError as exc:
+            return web.json_response({"success": False, "error": str(exc)}, status=409)
+        return web.json_response({"success": True, "cron_id": cron_id, "action": action,
+                                  "run_id": run_id, "status": "accepted"})
 
     @property
     def port(self) -> int:
@@ -169,6 +225,13 @@ class InternalAgentAPI:
         summary = str(data.get("summary", ""))
         chat_id = int(data["chat_id"]) if data.get("chat_id") else 0
         topic_id = int(data["topic_id"]) if data.get("topic_id") else None
+        transport = data.get("transport", "tg")
+
+        if not isinstance(transport, str) or transport not in {"tg", "mx", "dc", "api"}:
+            return web.json_response(
+                {"success": False, "error": "Invalid 'transport' field"},
+                status=400,
+            )
 
         if not recipient or not message:
             return web.json_response(
@@ -191,6 +254,7 @@ class InternalAgentAPI:
             summary=summary,
             chat_id=chat_id,
             topic_id=topic_id,
+            transport=transport,
         )
         task_id = self._bus.send_async(
             sender=sender,
@@ -249,9 +313,15 @@ class InternalAgentAPI:
 
         prompt = data.get("prompt", "")
         sender = data.get("from", "main")
+        transport = data.get("transport", "tg")
         if not prompt:
             return web.json_response(
                 {"success": False, "error": "Missing 'prompt' field"},
+                status=400,
+            )
+        if not isinstance(transport, str) or transport not in {"tg", "mx", "dc", "api"}:
+            return web.json_response(
+                {"success": False, "error": "Invalid 'transport' field"},
                 status=400,
             )
 
@@ -263,11 +333,14 @@ class InternalAgentAPI:
             message_id=0,
             thread_id=data.get("topic_id") or None,
             parent_agent=sender,
+            transport=transport,
             name=data.get("name", ""),
             provider_override=data.get("provider") or "",
             model_override=data.get("model") or "",
             thinking_override=data.get("thinking") or "",
             priority=normalise_priority(data.get("priority")),
+            request_id=str(data.get("request_id") or "")[:128],
+            parent_id=str(data.get("parent_id") or "")[:128],
         )
 
         try:
@@ -315,7 +388,9 @@ class InternalAgentAPI:
                 )
 
         try:
-            resumed_id = self._task_hub.resume(task_id, prompt, parent_agent=sender)
+            resumed_id = self._task_hub.resume(task_id, prompt, parent_agent=sender,
+                                            transport="api" if data.get("transport") == "api" else "",
+                                            request_id=str(data.get("request_id") or ""))
         except ValueError as exc:
             return web.json_response({"success": False, "error": str(exc)})
 

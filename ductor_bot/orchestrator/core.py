@@ -14,7 +14,6 @@ from ductor_bot.background import (
 )
 from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
-from ductor_bot.cli.stream_events import ToolUseEvent
 from ductor_bot.cli.types import AgentRequest
 from ductor_bot.config import AgentConfig
 from ductor_bot.cron.manager import CronManager
@@ -26,6 +25,7 @@ from ductor_bot.errors import (
     WebhookError,
     WorkspaceError,
 )
+from ductor_bot.infra.colony_events import event_path
 from ductor_bot.infra.docker import DockerManager
 from ductor_bot.infra.inflight import InflightTracker
 from ductor_bot.orchestrator.commands import (
@@ -139,6 +139,7 @@ class Orchestrator:
         self._cli_service = CLIService(
             config=CLIServiceConfig(
                 working_dir=str(paths.workspace),
+                event_log_path=str(event_path(paths.ductor_home)),
                 default_model=config.model,
                 provider=config.provider,
                 max_turns=config.max_turns,
@@ -170,9 +171,10 @@ class Orchestrator:
             topic_id: int | None = None,
             prompt: str | None = None,
             ack_token: str | None = None,
+            transport: str = "tg",
         ) -> str | None:
             return await self.handle_heartbeat(
-                SessionKey(chat_id=chat_id, topic_id=topic_id),
+                SessionKey(transport=transport, chat_id=chat_id, topic_id=topic_id),
                 prompt=prompt,
                 ack_token=ack_token,
             )
@@ -635,7 +637,10 @@ class Orchestrator:
         from ductor_bot.orchestrator.selectors.model_selector import _validate_reasoning_effort
 
         followup_effort = ns.reasoning_effort
-        if followup_effort and _validate_reasoning_effort(self, ns.model, followup_effort) is not None:
+        if (
+            followup_effort
+            and _validate_reasoning_effort(self, ns.model, followup_effort) is not None
+        ):
             followup_effort = "medium"
         sub = BackgroundSubmit(
             chat_id=chat_id,
@@ -724,6 +729,7 @@ class Orchestrator:
             self._cli_service.update_config(
                 CLIServiceConfig(
                     working_dir=str(self._paths.workspace),
+                    event_log_path=str(event_path(self._paths.ductor_home)),
                     default_model=config.model,
                     provider=config.provider,
                     max_turns=config.max_turns,

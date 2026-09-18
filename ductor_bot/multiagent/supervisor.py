@@ -435,6 +435,8 @@ class AgentSupervisor:
                 return
             orch.supervisor = supervisor
             if stack.is_main:
+                if supervisor._internal_api is not None:
+                    supervisor._internal_api.set_colony_runtime(orch._observers.cron, orch.cli_service)
                 orch.register_multiagent_commands()
                 stack.bot.set_abort_all_callback(supervisor.abort_all_agents)
                 supervisor._main_ready.set()

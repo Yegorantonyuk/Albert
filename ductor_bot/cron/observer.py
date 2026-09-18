@@ -7,9 +7,11 @@ import logging
 import os
 import sys
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cronsim import CronSim, CronSimError
@@ -18,6 +20,7 @@ from ductor_bot.cli.param_resolver import TaskOverrides
 from ductor_bot.config import resolve_user_timezone
 from ductor_bot.cron.manager import CronManager
 from ductor_bot.infra.base_task_observer import BaseTaskObserver
+from ductor_bot.infra.colony_events import CURRENT_RUN, ExecutionRun, event_path, scrub
 from ductor_bot.infra.file_watcher import FileWatcher
 from ductor_bot.infra.task_runner import execute_in_task_folder
 from ductor_bot.log_context import set_log_context
@@ -68,6 +71,8 @@ class CronObserver(BaseTaskObserver):
         self._on_result: CronResultCallback | None = None
         self._scheduled: dict[str, asyncio.Task[None]] = {}
         self._executing: set[str] = set()
+        self._manual: dict[str, asyncio.Task[None]] = {}
+        self._manual_requests: dict[str, tuple[str, str]] = {}
         self._reschedule_lock = asyncio.Lock()
         self._requested_reschedule_task: asyncio.Task[None] | None = None
         self._delivery_retry_task: asyncio.Task[None] | None = None
@@ -104,13 +109,56 @@ class CronObserver(BaseTaskObserver):
         if request_task is not None:
             request_task.cancel()
             await asyncio.gather(request_task, return_exceptions=True)
-        tasks = list(self._scheduled.values())
+        tasks = list(self._scheduled.values()) + list(self._manual.values())
+        self._manual.clear()
         for task in tasks:
             task.cancel()
         self._scheduled.clear()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         logger.info("CronObserver stopped")
+
+    def colony_jobs(self) -> list[dict[str, object]]:
+        return [{"id": job.id, "name": scrub(job.title), "enabled": job.enabled,
+                 "running": job.id in self._executing, "schedule": job.schedule,
+                 "provider": job.provider or self._config.provider,
+                 "model": job.model or self._config.model}
+                for job in self._manager.list_jobs()]
+
+    async def colony_toggle(self, cron_id: str, *, enabled: bool) -> None:
+        if self._manager.get_job(cron_id) is None:
+            raise KeyError(cron_id)
+        self._manager.set_enabled(cron_id, enabled=enabled)
+        await self.reschedule_now()
+
+    def run_once(self, cron_id: str, request_id: str) -> str:
+        """Run through the normal execution path without changing its schedule."""
+        previous = self._manual_requests.get(request_id)
+        if previous is not None:
+            if previous[0] != cron_id:
+                raise ValueError("Request ID belongs to another cron")
+            return previous[1]
+        job = self._manager.get_job(cron_id)
+        if job is None:
+            raise KeyError(cron_id)
+        if cron_id in self._executing:
+            raise ValueError("Cron is already running")
+        run_id = uuid.uuid4().hex
+        # Reserve synchronously, before the coroutine can yield to the timer.
+        self._executing.add(cron_id)
+        self._manual_requests[request_id] = (cron_id, run_id)
+        if len(self._manual_requests) > 256:
+            del self._manual_requests[next(iter(self._manual_requests))]
+        task = asyncio.create_task(self._execute_job(
+            cron_id, job.agent_instruction, job.task_folder,
+            manual=True, reserved=True, run_id=run_id), name=f"colony-cron:{cron_id}")
+        self._manual[cron_id] = task
+        def finished(done: asyncio.Task[None]) -> None:
+            self._manual.pop(cron_id, None)
+            if not done.cancelled():
+                done.exception()  # journal already records errors; always consume
+        task.add_done_callback(finished)
+        return run_id
 
     def request_reschedule(self) -> None:
         """Queue a background reschedule request without blocking the caller."""
@@ -405,36 +453,61 @@ class CronObserver(BaseTaskObserver):
         if changed:
             await self._watcher.update_mtime()
 
-    async def _execute_job(
+    async def _execute_job(  # noqa: PLR0913
         self,
         job_id: str,
         instruction: str,
         task_folder: str,
+        *,
+        manual: bool = False,
+        reserved: bool = False,
+        run_id: str | None = None,
     ) -> None:
         """Spawn a fresh CLI session in the cron_task folder."""
+        if job_id in self._executing and not reserved:
+            return
         self._executing.add(job_id)
+        job = self._manager.get_job(job_id)
+        home = getattr(self._paths, "ductor_home", None)
+        run = ExecutionRun(event_path(home) if isinstance(home, Path) else None, run_id=run_id,
+                           kind="cron", cron_id=job_id, name=job.title if job else job_id,
+                           provider=(job.provider if job else None) or self._config.provider,
+                           model=(job.model if job else None) or self._config.model)
+        token = CURRENT_RUN.set(run)
+        run.emit("started")
         try:
-            await self._execute_job_inner(job_id, instruction, task_folder)
+            status = await self._execute_job_inner(job_id, instruction, task_folder, manual=manual)
+            run.finish("failed" if status.startswith("error") else "completed",
+                       stage=status, result_ref="cron:" + job_id)
+        except asyncio.CancelledError:
+            run.finish("cancelled")
+            raise
+        except Exception:
+            run.finish("failed")
+            raise
         finally:
+            CURRENT_RUN.reset(token)
             self._executing.discard(job_id)
 
-    async def _execute_job_inner(
+    async def _execute_job_inner(  # noqa: PLR0911
         self,
         job_id: str,
         instruction: str,
         task_folder: str,
-    ) -> None:
+        *,
+        manual: bool = False,
+    ) -> str:
         set_log_context(operation="cron")
         job = self._manager.get_job(job_id)
         job_title = job.title if job else job_id
         routing = (job.chat_id, job.topic_id, job.transport) if job else (0, None, "tg")
 
-        if job and not job.enabled:
+        if job and not job.enabled and not manual:
             logger.info("Cron job %s is disabled, skipping execution", job_title)
-            return
+            return "skipped:disabled"
 
-        if self._is_quiet_hours(job, job_title):
-            return
+        if not manual and self._is_quiet_hours(job, job_title):
+            return "skipped:quiet_hours"
 
         logger.info("Cron job starting job=%s", job_title)
         t0 = time.monotonic()
@@ -446,7 +519,7 @@ class CronObserver(BaseTaskObserver):
                 delivery_status="skipped",
             )
             await self._watcher.update_mtime()
-            return
+            return "success:preflight"
 
         overrides = TaskOverrides(
             provider=job.provider if job else None,
@@ -467,10 +540,20 @@ class CronObserver(BaseTaskObserver):
             timeout_seconds=self._config.cli_timeout,
         )
 
+        if manual:
+            folder = self._paths.cron_tasks_dir / task_folder
+            if folder.is_dir():
+                (folder / "RESULT.md").write_text(
+                    scrub(result.result_text, 128 * 1024, multiline=True), encoding="utf-8")
+            self._manager.update_run_status(job_id, status=result.status,
+                                            delivery_status="skipped")
+            await self._watcher.update_mtime()
+            return result.status
+
         if result.status == "error:folder_missing":
             logger.error("Cron task folder missing: %s", task_folder)
             self._manager.update_run_status(job_id, status="error:folder_missing")
-            return
+            return result.status
 
         if result.execution is None:
             logger.error("CLI not found for cron job %s", job_id)
@@ -487,7 +570,7 @@ class CronObserver(BaseTaskObserver):
                 delivery_status="ok" if delivered else "failed",
                 delivery_error=delivery_error,
             )
-            return
+            return result.status
 
         elapsed_ms = (time.monotonic() - t0) * 1000
         logger.info(
@@ -538,6 +621,7 @@ class CronObserver(BaseTaskObserver):
         # run-status write as a user-initiated change and trigger a full
         # reschedule of all other jobs.
         await self._watcher.update_mtime()
+        return result.status
 
     async def _run_preflight(self, job_title: str, task_folder: str) -> bool:
         """Return true when an enabled task-local preflight safely skips the agent."""

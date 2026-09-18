@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ductor_bot.infra.colony_events import CURRENT_RUN
+
 if TYPE_CHECKING:
     from ductor_bot.cli.param_resolver import TaskExecutionConfig, TaskOverrides
     from ductor_bot.cron.execution import OneShotExecutionResult
@@ -105,6 +107,10 @@ async def execute_in_task_folder(  # noqa: PLR0913
             )
 
         exec_config = observer.resolve_execution_config(overrides)
+        run = CURRENT_RUN.get()
+        if run is not None:
+            run.fields.update(provider=exec_config.provider, model=exec_config.model)
+            run.stage("working")
         enriched = enrich_instruction(instruction, task_folder)
 
         logger.debug(
