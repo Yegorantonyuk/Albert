@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -124,6 +125,7 @@ class HeartbeatTarget(BaseModel):
     """
 
     enabled: bool = True
+    transport: Literal["tg", "mx", "dc", "api"] = "tg"
     chat_id: int | None = None
     topic_id: int | None = None
     prompt: str | None = None
@@ -267,6 +269,8 @@ class CronDeliveryRetryConfig(BaseModel):
     enabled: bool = False
     interval_seconds: int = Field(default=300, ge=1)
     max_attempts: int = Field(default=12, ge=1)
+
+
 class CronPreflightConfig(BaseModel):
     """Task-local deterministic gate that can skip a cron agent run."""
 
@@ -662,14 +666,16 @@ class ModelRegistry:
 
     @staticmethod
     def provider_for(model_id: str) -> str:
-        """Return the provider for a model ID."""
+        """Return the provider for a model ID.
+
+        Exact catalogue matches win over prefix heuristics: Antigravity serves
+        models whose ids look like another provider's (``gemini-3.8-flash-high``,
+        ``claude-sonnet-4-6``, ``gpt-oss-120b-medium``), so the ``gemini-``
+        prefix rule and the ``codex`` fallback must not swallow them.
+        """
         if model_id in CLAUDE_MODELS:
             return "claude"
-        if (
-            model_id in _GEMINI_ALIASES
-            or model_id in _runtime_gemini[0]
-            or model_id.startswith(("gemini-", "auto-gemini-"))
-        ):
+        if model_id in _GEMINI_ALIASES or model_id in _runtime_gemini[0]:
             return "gemini"
         if (
             model_id in ANTIGRAVITY_MODELS
@@ -677,6 +683,8 @@ class ModelRegistry:
             or model_id.startswith("antigravity-")
         ):
             return "antigravity"
+        if model_id.startswith(("gemini-", "auto-gemini-")):
+            return "gemini"
         return "codex"
 
 

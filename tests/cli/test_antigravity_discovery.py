@@ -97,3 +97,16 @@ def test_runtime_display_name_routes_to_antigravity() -> None:
 def test_runtime_display_name_unknown_routes_to_codex() -> None:
     # Without discovery, a bare display name is not recognized as Antigravity.
     assert ModelRegistry().provider_for("Claude Opus 4.6 (Thinking)") == "codex"
+
+
+def test_gemini_prefixed_antigravity_model_routes_to_antigravity() -> None:
+    # Antigravity serves Gemini/Claude/GPT models under their vendor ids; the
+    # discovered catalogue must beat the generic ``gemini-`` prefix rule,
+    # otherwise the request is handed to a Gemini CLI that may not exist.
+    set_antigravity_models(frozenset({"gemini-3.8-flash-high", "gpt-oss-120b-medium"}))
+    assert ModelRegistry().provider_for("gemini-3.8-flash-high") == "antigravity"
+    assert ModelRegistry().provider_for("gpt-oss-120b-medium") == "antigravity"
+
+
+def test_gemini_prefix_still_routes_to_gemini_without_antigravity() -> None:
+    assert ModelRegistry().provider_for("gemini-2.5-pro") == "gemini"
