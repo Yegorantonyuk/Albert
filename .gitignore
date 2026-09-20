@@ -57,3 +57,6 @@ desktop.ini
 start_bot.sh
 python_best_practice.md
 run.py
+
+# graphify knowledge graph output (local, rebuildable)
+graphify-out/
