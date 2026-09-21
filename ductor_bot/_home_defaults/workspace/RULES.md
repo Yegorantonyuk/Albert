@@ -54,27 +54,14 @@ Custom skills live in `skills/`. See `skills/CLAUDE/GEMINI/AGENTS.md` for sync r
 
 ## External API Secrets
 
-Store external API keys in `~/.ductor/.env`:
-
-```env
-PPLX_API_KEY=sk-xxx
-DEEPSEEK_API_KEY=sk-yyy
-```
-
-These secrets are automatically available in all CLI executions (host and Docker).
-Existing environment variables are never overridden.
-Changes take effect on the next CLI invocation (no restart needed).
+External API keys live in `~/.ductor/.env` (`KEY=value` per line). They are injected
+into every CLI execution (host and Docker), never override existing env vars, and
+take effect on the next invocation without restart.
 
 ## Bot Restart
 
-If you need the bot to restart (e.g. after config changes, updates, or recovery):
-
-```bash
-touch ~/.ductor/restart-requested
-```
-
-The bot detects this marker within seconds and performs a clean restart.
-Always tell the user you triggered a restart.
+To restart the bot (config changes, updates, recovery): `touch ~/.ductor/restart-requested`.
+It restarts cleanly within seconds. Always tell the user you triggered a restart.
 
 ## Safety Boundaries
 
@@ -108,37 +95,15 @@ python3 tools/task_tools/cancel_task.py TASK_ID
 
 ### Resuming a completed task (keeping context)
 
-When a task is done and you need more from it, **resume** instead of creating
-a new task. The agent still has its full context from the previous run.
-
-```bash
-python3 tools/task_tools/resume_task.py TASK_ID "jetzt nur 2. Bundesliga Ergebnisse"
-```
-
-**When to resume vs. create new:**
-- **Resume**: Refine results, adjust parameters, ask follow-ups — the agent
-  already has all its research/context from the first run
-- **New task**: Completely different work, unrelated to any previous task
-
-Example: Task searched Python best practices → user wants more detail on
-testing → resume the task (it already has all the context).
+Need more from a finished task? **Resume** it instead of creating a new one — the
+agent keeps its context: `python3 tools/task_tools/resume_task.py TASK_ID "refinement"`.
+Resume for refinements and follow-ups; create new only for unrelated work.
 
 ### Handling task questions (ask_parent flow)
 
-Task agents can ask you questions via `ask_parent.py`. When a question arrives:
-
-1. If you know the answer from the conversation → answer directly
-2. If you don't know → ask the user → then **resume the task** with the answer
-
-Example flow:
-- User: "Suche Flüge nach Paris"
-- You create a task
-- Task agent asks: "Für wann? Von welchem Flughafen?"
-- You don't know → ask the user
-- User answers: "Juni, ab Frankfurt"
-- You resume the task: `resume_task.py TASK_ID "Juni, ab Frankfurt FRA"`
-
-This creates a clean conversation layer: user ↔ you ↔ task agent.
+Task agents can ask you via `ask_parent.py`. Answer from the conversation if you
+can; otherwise ask the user, then resume the task with the answer. Layers stay
+clean: user ↔ you ↔ task agent.
 
 ### Critical rules
 

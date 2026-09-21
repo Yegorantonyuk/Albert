@@ -71,98 +71,20 @@ python3 tools/agent_tools/create_agent.py \
 
 ### Matrix Agent
 
-Requires a Matrix account (user ID, homeserver URL). Password is optional
-at creation time — it can be added to `agents.json` later before starting.
-
-```bash
-python3 tools/agent_tools/create_agent.py \
-  --name "matrix-agent" \
-  --transport matrix \
-  --homeserver "https://matrix.example.com" \
-  --user-id "@bot:matrix.example.com" \
-  --allowed-users "@alice:example.com,@bob:example.com" \
-  --provider claude \
-  --model opus \
-  --description "Short agent description"
-```
-
-**Matrix-specific flags:**
-
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--transport matrix` | Yes* | Selects Matrix transport (*auto-detected if `--homeserver` present) |
-| `--homeserver` | Yes | Homeserver URL (must be HTTPS) |
-| `--user-id` | Yes | Bot's Matrix user ID (`@localpart:domain`) |
-| `--password` | No | Account password for initial login (token saved after first login) |
-| `--allowed-users` | No | Comma-separated Matrix user IDs to allow (empty = all users) |
-| `--allowed-rooms` | No | Comma-separated room IDs (`!id:srv`) or aliases (`#name:srv`). Empty = all rooms |
-
-**Note:** `--token`/`--users` (Telegram) and `--homeserver`/`--user-id`/`--password`
-(Matrix) are mutually exclusive. The script rejects conflicting flags.
-
-**Credentials flow:** The bot needs either `password` or `access_token` in its
-config to log in. On first login with a password, the bot saves an `access_token`
-to `matrix_store/credentials.json`. After that, the password is no longer needed.
+Same script with `--transport matrix --homeserver URL --user-id @bot:server
+[--password ...] [--allowed-users ...] [--allowed-rooms ...]`. Telegram flags
+(`--token/--users`) and Matrix flags are mutually exclusive. On first login the
+bot saves an `access_token` to `matrix_store/credentials.json`; the password is
+not needed afterwards. The bot needs its own Matrix account (register via the
+homeserver UI/Element, or `register_new_matrix_user` on self-hosted Synapse).
 
 ### Join Notification (`--description`)
 
-**Always provide `--description`** when creating a sub-agent. This text is
-saved as `workspace/JOIN_NOTIFICATION.md` and **automatically sent + pinned**
-when the user first opens the bot chat or the bot joins a room.
-
-Write a compact message (max ~500 chars) that tells the user:
-1. What this agent does (one sentence)
-2. Key commands: `/new` (fresh context), `/stop` (cancel), `/model` (switch), `/help`
-3. How to start
-
-Example:
-```
---description "I'm your code review assistant. Send me code or a repo link and I'll review it.
-
-**Commands**
-- /new — Fresh conversation
-- /stop — Cancel running task
-- /model — Switch AI model
-- /help — All commands
-
-Send any message to begin."
-```
-
-To update an existing agent's notification, edit
-`~/.ductor/agents/<name>/workspace/JOIN_NOTIFICATION.md` directly.
-
-## Matrix Bot Account Setup
-
-A Matrix agent needs a dedicated Matrix account. There are several ways
-to create one, depending on the homeserver setup.
-
-### Option 1: Public or Managed Homeserver
-
-Register a new account through the homeserver's web interface or via
-Element/another Matrix client. Use a descriptive username like
-`ductor-bot` or `my-assistant`.
-
-- Go to the homeserver's registration page or use Element → "Create Account"
-- Choose a username and password
-- Note down the full user ID: `@username:homeserver.domain`
-- Note down the homeserver URL: `https://homeserver.domain`
-
-### Option 2: Self-Hosted Synapse
-
-Use the built-in registration tool or the Admin API.
-
-**CLI registration:**
-```bash
-register_new_matrix_user -u botname -p password \
-  -c /path/to/homeserver.yaml http://localhost:8008
-```
-
-### After Account Creation
-
-1. You have: **homeserver URL**, **user ID** (`@bot:server`), **password**
-2. Create the agent with `create_agent.py --transport matrix ...`
-3. On first start, the bot logs in with the password and saves an access token
-4. The password is not used again after the initial login
+Always pass `--description`: it is saved as `workspace/JOIN_NOTIFICATION.md` and
+auto-sent + pinned when the user first opens the bot. Max ~500 chars: what the
+agent does (one sentence), key commands (`/new`, `/stop`, `/model`, `/help`),
+how to start. Edit `~/.ductor/agents/<name>/workspace/JOIN_NOTIFICATION.md` to
+change it later.
 
 ## Inter-Agent Communication
 
