@@ -105,11 +105,35 @@ def available_job_ids(jobs: list[dict[str, Any]]) -> list[str]:
     return available_ids(jobs)
 
 
+# A task folder may live outside cron_tasks (shared crons in ~/.ductor/crons/,
+# project crons in workspace/projects/<area>/crons/).  cron_tasks/<name> is then a
+# symlink to the real folder; the framework itself only ever looks in cron_tasks.
+LINKED_TASK_ROOTS = (DUCTOR_HOME / "crons", DUCTOR_HOME / "workspace" / "projects")
+
+
+def task_entry(task_folder: str) -> Path:
+    """Return ``cron_tasks/<task_folder>`` itself (may be a symlink), rejecting traversal."""
+    rel = Path(task_folder)
+    if not task_folder or rel.is_absolute() or ".." in rel.parts:
+        msg = f"Path traversal blocked: {task_folder!r} is not a plain cron_tasks name"
+        raise ValueError(msg)
+    return CRON_TASKS_DIR / rel
+
+
 def safe_task_dir(task_folder: str) -> Path:
-    """Resolve and validate a cron task folder path under CRON_TASKS_DIR."""
-    folder_path = (CRON_TASKS_DIR / task_folder).resolve()
-    if not folder_path.is_relative_to(CRON_TASKS_DIR.resolve()):
-        msg = f"Path traversal blocked: {task_folder!r} resolves outside cron_tasks"
+    """Resolve and validate a cron task folder.
+
+    The real folder must sit under CRON_TASKS_DIR, or — when ``cron_tasks/<name>``
+    is a symlink — under one of LINKED_TASK_ROOTS (never a root itself).
+    """
+    entry = task_entry(task_folder)
+    folder_path = entry.resolve()
+    roots = [CRON_TASKS_DIR.resolve()]
+    if entry.is_symlink():
+        roots += [root.resolve() for root in LINKED_TASK_ROOTS]
+    inside = any(folder_path.is_relative_to(root) and folder_path != root for root in roots)
+    if not inside:
+        msg = f"Path traversal blocked: {task_folder!r} resolves outside allowed cron folders"
         raise ValueError(msg)
     return folder_path
 

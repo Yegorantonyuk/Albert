@@ -20,6 +20,7 @@ from _shared import (
     find_job_by_id_or_task_folder,
     load_jobs_strict,
     safe_task_dir,
+    task_entry,
     save_jobs,
 )
 
@@ -113,6 +114,12 @@ def main() -> None:
             folder_deleted = True
         except OSError as exc:
             folder_error = str(exc)
+    # A folder living outside cron_tasks leaves a symlink behind; drop it too
+    # (also cleans up a link whose target is already gone).
+    if folder_error is None:
+        entry = task_entry(task_folder)
+        if entry.is_symlink() and not entry.exists():
+            entry.unlink()
 
     # Build result
     result: dict = {

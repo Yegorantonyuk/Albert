@@ -24,6 +24,7 @@ from _shared import (
     load_jobs_strict,
     render_cron_task_claude_md,
     safe_task_dir,
+    task_entry,
     sanitize_name,
     save_jobs,
 )
@@ -160,9 +161,10 @@ def _rename_task_folder(
 ) -> tuple[bool, bool, list[str]]:
     notes: list[str] = []
     old_folder = safe_task_dir(old_task_folder)
-    new_folder = safe_task_dir(new_name)
+    old_entry = task_entry(old_task_folder)
+    new_entry = task_entry(new_name)
 
-    if new_folder.exists():
+    if new_entry.exists() or new_entry.is_symlink():
         msg = f"Target folder already exists: cron_tasks/{new_name}"
         raise FileExistsError(msg)
 
@@ -172,7 +174,18 @@ def _rename_task_folder(
         )
         return False, False, notes
 
-    old_folder.rename(new_folder)
+    if old_entry.is_symlink():
+        # Folder lives outside cron_tasks: rename it in place, re-point the link.
+        new_folder = old_folder.parent / new_name
+        if new_folder.exists():
+            msg = f"Target folder already exists: {new_folder}"
+            raise FileExistsError(msg)
+        old_folder.rename(new_folder)
+        old_entry.unlink()
+        new_entry.symlink_to(new_folder)
+    else:
+        new_folder = safe_task_dir(new_name)
+        old_folder.rename(new_folder)
 
     memory_renamed = False
     memory_candidates = [f"{old_task_folder}_MEMORY.md", f"{old_id}_MEMORY.md"]
